@@ -1,0 +1,152 @@
+"""
+MambGAT-AD 独立评估脚本
+
+用于加载已训练的 checkpoint，在测试集上生成完整评估报告，
+并可视化学习到的传感器耦合图（论文图表）。
+
+用法：
+  python evaluate.py --ckpt checkpoints/best_smap.pt
+  python evaluate.py --ckpt checkpoints/best_smap.pt --plot_graph
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+import numpy as np
+import torch
+
+from data import build_loaders
+from models import MambGATAD
+from utils import evaluate_anomaly, print_metrics
+from utils.threshold import PerChannelThreshold
+
+
+def evaluate(args):
+    # ── 加载 checkpoint ───────────────────────────────────────────
+    ckpt   = torch.load(args.ckpt, map_location="cpu")
+    cfg    = ckpt["cfg"]
+    channels = ckpt.get("channels", [])
+
+    device_str = cfg["train"].get("device", "cuda")
+    if device_str == "cuda" and not torch.cuda.is_available():
+        device_str = "cpu"
+    device = torch.device(device_str)
+
+    # ── 数据 ──────────────────────────────────────────────────────
+    train_loader, test_loader, test_labels, channels = build_loaders(
+        data_dir    = cfg["data"]["data_dir"],
+        label_file  = cfg["data"]["label_file"],
+        dataset     = cfg["data"]["dataset"],
+        window_size = cfg["data"]["window_size"],
+        train_step  = cfg["data"].get("window_step", 5),
+        test_step   = cfg["data"].get("test_step", 1),
+        batch_size  = cfg["train"]["batch_size"],
+        num_workers = 0,
+    )
+    n_channels  = len(channels)
+    window_size = cfg["data"]["window_size"]
+
+    # ── 模型 ──────────────────────────────────────────────────────
+    model = MambGATAD(
+        n_channels  = n_channels,
+        window_size = window_size,
+        d_model     = cfg["model"]["d_model"],
+        n_blocks    = cfg["model"]["n_blocks"],
+        n_heads     = cfg["model"]["n_heads"],
+        d_state     = cfg["model"]["d_state"],
+        d_conv      = cfg["model"]["d_conv"],
+        expand      = cfg["model"]["expand"],
+        pred_len    = cfg["model"]["pred_len"],
+        dropout     = 0.0,  # 评估时关闭 dropout
+    ).to(device)
+
+    model.load_state_dict(ckpt["model_state"])
+    model.eval()
+    print(f"[Eval] 加载 checkpoint: {args.ckpt}  (epoch {ckpt.get('epoch','?')})")
+
+    # ── 收集误差 ──────────────────────────────────────────────────
+    def collect(loader):
+        all_s = []
+        with torch.no_grad():
+            for x, _ in loader:
+                x = x.to(device, dtype=torch.float32)
+                _, s = model(x)
+                all_s.append(s.cpu().numpy())
+        return np.concatenate(all_s, axis=0)
+
+    print("[Eval] 推理中 ...")
+    train_errors = collect(train_loader)
+    test_errors  = collect(test_loader)
+
+    # ── 阈值与预测 ────────────────────────────────────────────────
+    thr_cfg = cfg.get("threshold", {})
+    thresholder = PerChannelThreshold(
+        method       = thr_cfg.get("method", "telemanom"),
+        p            = thr_cfg.get("p", 0.13),
+        error_buffer = thr_cfg.get("error_buffer", 100),
+        percentile   = thr_cfg.get("percentile", 99.5),
+    )
+    thresholder.fit(train_errors)
+    _, global_pred = thresholder.predict(test_errors)
+
+    test_len    = len(global_pred)
+    labels_flat = test_labels[:test_len].any(axis=1).astype(int)
+    global_score = test_errors.mean(axis=1)
+
+    # ── 指标 ──────────────────────────────────────────────────────
+    metrics = evaluate_anomaly(
+        y_true=labels_flat, y_pred=global_pred,
+        y_score=global_score, use_pa=True,
+    )
+    print_metrics(metrics, prefix=f"MambGAT-AD [{cfg['data']['dataset'].upper()}]")
+
+    # ── 保存结果 ──────────────────────────────────────────────────
+    out_dir  = Path(args.ckpt).parent
+    out_path = out_dir / f"eval_{cfg['data']['dataset']}.json"
+    with open(out_path, "w") as f:
+        json.dump({k: round(float(v), 6) for k, v in metrics.items()}, f, indent=2)
+    print(f"[Eval] 结果保存至 {out_path}")
+
+    # ── 可视化传感器耦合图 ────────────────────────────────────────
+    if args.plot_graph:
+        _plot_adjacency(model, channels, out_dir, cfg["data"]["dataset"])
+
+    return metrics
+
+
+def _plot_adjacency(model, channels, out_dir, dataset_name):
+    """绘制学习到的传感器耦合图（论文 Figure 用）"""
+    try:
+        import matplotlib.pyplot as plt
+        import matplotlib.colors as mcolors
+
+        adj = model.get_graph(head_idx=0).numpy()  # (N, N)
+        N = len(channels)
+
+        fig, ax = plt.subplots(figsize=(max(8, N * 0.3), max(8, N * 0.3)))
+        im = ax.imshow(adj, cmap="viridis", aspect="auto")
+        ax.set_xticks(range(N))
+        ax.set_yticks(range(N))
+        ax.set_xticklabels(channels, rotation=90, fontsize=6)
+        ax.set_yticklabels(channels, fontsize=6)
+        ax.set_title(f"MambGAT-AD 学习到的传感器耦合图\n({dataset_name.upper()})", pad=10)
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        plt.tight_layout()
+
+        fig_path = out_dir / f"graph_{dataset_name}.pdf"
+        plt.savefig(fig_path, bbox_inches="tight", dpi=150)
+        plt.close()
+        print(f"[Eval] 耦合图已保存 → {fig_path}")
+    except Exception as e:
+        print(f"[WARN] 绘图失败: {e}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="MambGAT-AD 评估脚本")
+    parser.add_argument("--ckpt",       required=True, help="checkpoint 路径")
+    parser.add_argument("--plot_graph", action="store_true", help="输出传感器耦合图")
+    args = parser.parse_args()
+    evaluate(args)
