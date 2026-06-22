@@ -38,6 +38,7 @@ def evaluate(args):
     # ── 数据 ──────────────────────────────────────────────────────
     train_loader, test_loader, test_labels, n_channels = build_loaders(
         data_dir    = cfg["data"]["data_dir"],
+        label_file  = cfg["data"]["label_file"],
         dataset     = cfg["data"]["dataset"],
         window_size = cfg["data"]["window_size"],
         train_step  = cfg["data"].get("window_step", 5),

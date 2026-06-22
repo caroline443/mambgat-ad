@@ -84,13 +84,14 @@ def train(cfg: dict):
     # ── 数据 ──────────────────────────────────────────────────────
     train_loader, test_loader, test_labels, n_channels = build_loaders(
         data_dir       = cfg["data"]["data_dir"],
+        label_file     = cfg["data"]["label_file"],
         dataset        = cfg["data"]["dataset"],
         window_size    = cfg["data"]["window_size"],
         train_step     = cfg["data"].get("window_step", 5),
         test_step      = cfg["data"].get("test_step", 1),
         batch_size     = cfg["train"]["batch_size"],
         normalize_data = cfg["data"].get("normalize", True),
-        num_workers    = cfg["train"].get("num_workers", 4),
+        num_workers    = cfg["train"].get("num_workers", 0),
     )
     window_size = cfg["data"]["window_size"]
 

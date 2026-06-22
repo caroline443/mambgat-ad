@@ -1,3 +1,3 @@
-from .dataset import TimeSeriesDataset, build_loaders, load_data
+from .dataset import TimeSeriesDataset, build_loaders, get_channels
 
-__all__ = ["TimeSeriesDataset", "build_loaders", "load_data"]
+__all__ = ["TimeSeriesDataset", "build_loaders", "get_channels"]
