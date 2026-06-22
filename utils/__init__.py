@@ -1,7 +1,7 @@
-from .metrics import evaluate_anomaly, point_adjust
-from .threshold import TelemanomThreshold, PercentileThreshold
+from .metrics import evaluate_anomaly, point_adjust, print_metrics
+from .threshold import TelemanomThreshold, PercentileThreshold, PerChannelThreshold
 
 __all__ = [
-    "evaluate_anomaly", "point_adjust",
-    "TelemanomThreshold", "PercentileThreshold",
+    "evaluate_anomaly", "point_adjust", "print_metrics",
+    "TelemanomThreshold", "PercentileThreshold", "PerChannelThreshold",
 ]
