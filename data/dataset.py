@@ -61,7 +61,7 @@ def load_multivariate(
     data_dir: str,
     split: str,
     channels: List[str],
-    min_len: int = 200,          # 时间步少于此值的通道直接跳过
+    min_len: int = 110,          # 时间步少于此值的通道直接跳过（至少能出1个窗口）
 ) -> Tuple[np.ndarray, List[str]]:
     """
     加载所有通道并堆叠为多变量时间序列。
@@ -231,7 +231,7 @@ def build_loaders(
     train_loader = DataLoader(
         train_ds, batch_size=batch_size, shuffle=True,
         num_workers=num_workers, pin_memory=(num_workers > 0),
-        drop_last=True,
+        drop_last=False,   # 允许不完整的最后一个 batch，防止小数据集 0 batch
     )
     test_loader = DataLoader(
         test_ds, batch_size=batch_size, shuffle=False,
