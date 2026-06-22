@@ -167,8 +167,11 @@ def train(cfg: dict):
               f"lr={scheduler.get_last_lr()[0]:.2e}  "
               f"time={elapsed:.1f}s")
 
-        # 早停（基于 train loss，实验中可改为验证集）
-        if avg_loss < best_val_loss:
+        # 早停（基于 train loss）
+        is_nan = np.isnan(avg_loss)
+        if is_nan:
+            print(f"  [WARN] loss=nan，跳过本轮保存，检查数据或降低学习率")
+        elif avg_loss < best_val_loss:
             best_val_loss = avg_loss
             patience_cnt  = 0
             torch.save({
@@ -184,6 +187,15 @@ def train(cfg: dict):
             if patience_cnt >= patience:
                 print(f"\n  早停触发（{patience} 轮无改善）")
                 break
+
+        if not best_path.exists():
+            # 第一个有效 epoch 强制保存，避免后续评估 FileNotFoundError
+            if not is_nan:
+                torch.save({
+                    "epoch": epoch, "model_state": model.state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                    "cfg": cfg, "n_channels": n_channels,
+                }, best_path)
 
     # ── 评估 ──────────────────────────────────────────────────────
     print(f"\n{'═'*60}")

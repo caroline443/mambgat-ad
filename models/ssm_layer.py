@@ -84,7 +84,7 @@ class _SelectiveSSM(nn.Module):
         ssm_out = self.x_proj(x_in)
         dt_raw, B_ssm, C_ssm = torch.split(
             ssm_out, [self.dt_rank, self.d_state, self.d_state], dim=-1)
-        dt  = F.softplus(self.dt_proj(dt_raw))
+        dt  = F.softplus(self.dt_proj(dt_raw)).clamp(min=1e-4, max=1.0)  # 防溢出
         A   = -torch.exp(self.A_log.float())
 
         dA = torch.exp(dt.unsqueeze(-1) * A)               # (B,T,d_inner,d_state)
@@ -94,8 +94,10 @@ class _SelectiveSSM(nn.Module):
         ys = []
         for t in range(T):
             h  = dA[:, t] * h + dB[:, t] * x_in[:, t].unsqueeze(-1)
+            h  = h.clamp(-1e4, 1e4)                        # 防状态爆炸
             ys.append((h * C_ssm[:, t].unsqueeze(-2)).sum(-1))
         y = torch.stack(ys, dim=1) + self.D * x_in
+        y = torch.nan_to_num(y, nan=0.0, posinf=1e4, neginf=-1e4)  # 最后保险
         return self.out_proj(y * F.silu(z))
 
 

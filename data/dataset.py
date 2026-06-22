@@ -61,28 +61,43 @@ def load_multivariate(
     data_dir: str,
     split: str,
     channels: List[str],
+    min_len: int = 200,          # 时间步少于此值的通道直接跳过
 ) -> Tuple[np.ndarray, List[str]]:
     """
     加载所有通道并堆叠为多变量时间序列。
+    自动跳过缺失文件和过短的通道，以最短有效通道对齐。
 
     Returns:
         data:     (T, N)  float32
-        channels: 实际成功加载的通道名列表（跳过缺失文件）
+        channels: 实际成功加载的通道名列表
     """
     series, valid = [], []
+    skipped_short = []
+
     for ch in channels:
         path = os.path.join(data_dir, split, f"{ch}.npy")
         if not os.path.exists(path):
-            print(f"  [跳过] {ch}.npy 不存在")
             continue
-        series.append(_load_channel(data_dir, split, ch))
+        s = _load_channel(data_dir, split, ch)
+        if s.shape[0] < min_len:
+            skipped_short.append((ch, s.shape[0]))
+            continue
+        # 替换 NaN / Inf（少量坏点直接插值为 0）
+        if not np.isfinite(s).all():
+            s = np.where(np.isfinite(s), s, 0.0)
+        series.append(s)
         valid.append(ch)
 
-    if not series:
-        raise RuntimeError(f"在 {data_dir}/{split}/ 中没有找到任何通道文件！")
+    if skipped_short:
+        print(f"  [跳过] {len(skipped_short)} 个过短通道: "
+              f"{[f'{c}({l})' for c, l in skipped_short[:5]]}{'...' if len(skipped_short)>5 else ''}")
 
-    min_len = min(s.shape[0] for s in series)
-    data = np.stack([s[:min_len] for s in series], axis=1)  # (T, N)
+    if not series:
+        raise RuntimeError(f"在 {data_dir}/{split}/ 中没有找到有效通道！")
+
+    # 以最短通道对齐（截断，不影响长通道的前段数据）
+    align_len = min(s.shape[0] for s in series)
+    data = np.stack([s[:align_len] for s in series], axis=1)  # (T, N)
     return data, valid
 
 
@@ -125,8 +140,15 @@ def build_labels(
 def normalize(train: np.ndarray, test: np.ndarray
               ) -> Tuple[np.ndarray, np.ndarray]:
     mean = train.mean(axis=0, keepdims=True)
-    std  = train.std( axis=0, keepdims=True) + 1e-8
-    return (train - mean) / std, (test - mean) / std
+    std  = train.std( axis=0, keepdims=True)
+    # std 过小时（接近常数的通道）不做归一化，避免除零产生极大值
+    std  = np.where(std < 1e-4, 1.0, std)
+    train_n = (train - mean) / std
+    test_n  = (test  - mean) / std
+    # 截断极端值，防止 SSM 数值溢出
+    train_n = np.clip(train_n, -10.0, 10.0)
+    test_n  = np.clip(test_n,  -10.0, 10.0)
+    return train_n.astype(np.float32), test_n.astype(np.float32)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
