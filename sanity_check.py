@@ -1,10 +1,13 @@
 """
 快速冒烟测试 — 在下载真实数据前验证模型代码正确性
 
+运行环境：Linux 服务器，已安装 mamba-ssm
+
 用法：
   python sanity_check.py
 
 成功输出示例：
+  [OK] mamba_ssm 导入成功
   [OK] 前向传播通过  pred=(4, 55, 1)  score=(4, 55)
   [OK] 反向传播通过  loss=0.1234
   [OK] 参数量=2,345,678
@@ -13,12 +16,22 @@
 
 import torch
 import numpy as np
-from models import MambGATAD, PredictionLoss
 
 def main():
     print("=" * 50)
     print("  MambGAT-AD 快速冒烟测试")
     print("=" * 50)
+
+    # ── 检查 mamba_ssm ────────────────────────────────────────────
+    try:
+        import mamba_ssm
+        print(f"[OK] mamba_ssm 导入成功  版本={mamba_ssm.__version__}")
+    except ImportError as e:
+        print(f"[FAIL] mamba_ssm 未安装: {e}")
+        print("       请运行：pip install causal-conv1d mamba-ssm --no-build-isolation")
+        return
+
+    from models import MambGATAD, PredictionLoss
 
     # 模拟 SMAP 的配置：55 个通道，窗口长度 100
     N_CHANNELS  = 55

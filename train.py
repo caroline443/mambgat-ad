@@ -91,7 +91,7 @@ def train(cfg: dict):
         test_step      = cfg["data"].get("test_step", 1),
         batch_size     = cfg["train"]["batch_size"],
         normalize_data = cfg["data"].get("normalize", True),
-        num_workers    = 0,   # Windows 下必须为 0
+        num_workers    = cfg["train"].get("num_workers", 4),
     )
     n_channels  = len(channels)
     window_size = cfg["data"]["window_size"]

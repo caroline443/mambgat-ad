@@ -1,5 +1,6 @@
 # ──────────────────────────────────────────────
 # MambGAT-AD  |  SMAP / MSL 实验配置
+# 针对 V100-32GB × 1 卡优化
 # ──────────────────────────────────────────────
 
 data:
@@ -7,34 +8,33 @@ data:
   data_dir: ./datasets/data       # Telemanom 格式数据目录 (train/ test/)
   label_file: ./datasets/labeled_anomalies.csv
   window_size: 100                # 滑动窗口长度 T
-  window_step: 1                  # 滑动步长（训练时用 5 加速）
-  test_step: 1
+  window_step: 5                  # 训练集滑动步长（减少冗余样本）
+  test_step: 1                    # 测试集步长（逐点推理）
   normalize: true                 # z-score 归一化
 
 model:
-  d_model: 64                     # 节点特征维度
-  d_state: 16                     # SSM 状态维度
-  d_conv: 4                       # SSM 局部卷积核大小
-  expand: 2                       # SSM 内部维度倍数
-  n_heads: 4                      # GAT 多头注意力头数
-  n_blocks: 2                     # ST-Mamba 堆叠层数
+  d_model: 128                    # 特征维度（V100 32G 可以跑 128-256）
+  d_state: 16                     # Mamba SSM 状态维度
+  d_conv: 4                       # Mamba 局部卷积核大小
+  expand: 2                       # Mamba 内部维度倍数（d_inner = 2 × d_model）
+  n_heads: 8                      # GAT 多头注意力头数（需整除 d_model）
+  n_blocks: 3                     # ST-Mamba-GAT 堆叠层数
   dropout: 0.1
-  pred_len: 1                     # 预测步数（残差异常检测）
+  pred_len: 1                     # 预测步数
 
 train:
-  epochs: 30
-  batch_size: 64
+  epochs: 50
+  batch_size: 256                 # V100 32G，SMAP 55通道，256 绰绰有余
   lr: 1.0e-3
   weight_decay: 1.0e-5
-  patience: 5                     # 早停轮数
-  device: cuda                    # cuda | cpu
+  patience: 7                     # 早停轮数
+  device: cuda
   seed: 42
   save_dir: ./checkpoints
+  num_workers: 4                  # Linux 服务器可用多进程加载
 
 threshold:
   method: telemanom               # telemanom | percentile
-  # telemanom 方法参数
   p: 0.13
   error_buffer: 100
-  # percentile 方法参数
   percentile: 99.5

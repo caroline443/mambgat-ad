@@ -19,61 +19,68 @@
 
 ## 快速开始
 
-### 1. 安装环境（Windows + Anaconda）
+### 1. 安装环境（Linux 服务器 + V100）
 
-```batch
+```bash
+# 克隆仓库
+git clone https://github.com/caroline443/mambgat-ad.git
+cd mambgat-ad
+
+# 建虚拟环境
 conda create -n mambgat python=3.10 -y
 conda activate mambgat
 
-# 先安装 PyTorch（根据你的 CUDA 版本选择）
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+# 1. 安装 PyTorch（根据服务器 CUDA 版本）
+pip install torch --index-url https://download.pytorch.org/whl/cu118
 
-# 安装其他依赖
-pip install -r requirements.txt
+# 2. 安装 mamba-ssm（必须在 PyTorch 之后，需要 CUDA 编译）
+pip install causal-conv1d mamba-ssm --no-build-isolation
+
+# 3. 安装其余依赖
+pip install numpy pandas scikit-learn pyyaml tqdm einops matplotlib
 ```
 
 ### 2. 准备数据（SMAP / MSL）
 
-```batch
-:: 下载 Telemanom 数据集
+```bash
+# 下载 Telemanom 数据集
 git clone https://github.com/khundman/telemanom
-:: 将数据复制到本项目
-mkdir datasets
-xcopy /E telemanom\data datasets\data\
-copy telemanom\labeled_anomalies.csv datasets\
+mkdir -p datasets
+cp -r telemanom/data datasets/data
+cp telemanom/labeled_anomalies.csv datasets/
 
-:: 目录结构应为：
-:: datasets/
-::   data/
-::     train/  P-1.npy  S-1.npy  ...
-::     test/   P-1.npy  S-1.npy  ...
-::   labeled_anomalies.csv
+# 目录结构：
+# datasets/
+#   data/
+#     train/  P-1.npy  S-1.npy  ...
+#     test/   P-1.npy  S-1.npy  ...
+#   labeled_anomalies.csv
 ```
 
-### 3. 验证代码（无需真实数据）
+### 3. 验证环境（不需要真实数据）
 
-```batch
+```bash
 python sanity_check.py
 ```
 
 ### 4. 开始训练
 
-```batch
-:: 训练 SMAP
+```bash
+# 训练 SMAP（V100 32GB，约 20-30 分钟）
 python train.py --config config/smap.yaml
 
-:: 训练 MSL
+# 训练 MSL
 python train.py --config config/smap.yaml --dataset msl
 
-:: 自定义参数
+# 自定义参数
 python train.py --config config/smap.yaml --epochs 50 --lr 5e-4
 ```
 
 ### 5. 评估
 
-```batch
+```bash
 python evaluate.py --ckpt checkpoints/best_smap.pt
-python evaluate.py --ckpt checkpoints/best_smap.pt --plot_graph
+python evaluate.py --ckpt checkpoints/best_smap.pt --plot_graph  # 输出传感器耦合图
 ```
 
 ---
@@ -144,15 +151,16 @@ mambgat-ad/
 
 ---
 
-## 显存估算（A4000 16GB）
+## 显存估算（V100-32GB）
 
-| 配置 | 参数量 | 显存占用（估算） |
-|------|--------|----------------|
-| d_model=64, n_blocks=2 | ~1.5M | ~2-3 GB |
-| d_model=128, n_blocks=3 | ~5M | ~5-7 GB |
-| d_model=256, n_blocks=4 | ~18M | ~10-12 GB |
+| 配置 | 参数量 | 显存占用（估算） | 备注 |
+|------|--------|----------------|------|
+| d_model=64, n_blocks=2, bs=256 | ~1.5M | ~3-4 GB | 验证用 |
+| **d_model=128, n_blocks=3, bs=256** | **~5M** | **~8-10 GB** | **默认配置** |
+| d_model=256, n_blocks=4, bs=128 | ~18M | ~18-22 GB | 论文最终跑分用 |
 
-A4000 16GB 跑 d_model=128 完全没问题，留有充足余量。
+V100 32GB 跑默认配置（d_model=128）只用约 1/3 显存，batch_size 还可以继续拉大。
+原生 mamba_ssm CUDA kernel 比纯 PyTorch 实现快约 8-10 倍。
 
 ---
 
