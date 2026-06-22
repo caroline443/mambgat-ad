@@ -235,7 +235,7 @@ def train(cfg: dict):
     # 保存评估结果
     import json
     result_path = save_dir / f"results_{cfg['data']['dataset']}.json"
-    with open(result_path, "w") as f:
+    with open(result_path, "w", encoding="utf-8") as f:
         json.dump({k: round(float(v), 6) for k, v in metrics.items()}, f, indent=2)
     print(f"\n  结果已保存 → {result_path}")
 

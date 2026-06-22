@@ -105,7 +105,7 @@ def evaluate(args):
     # ── 保存结果 ──────────────────────────────────────────────────
     out_dir  = Path(args.ckpt).parent
     out_path = out_dir / f"eval_{cfg['data']['dataset']}.json"
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump({k: round(float(v), 6) for k, v in metrics.items()}, f, indent=2)
     print(f"[Eval] 结果保存至 {out_path}")
 
