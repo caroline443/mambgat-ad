@@ -22,14 +22,12 @@ def main():
     print("  MambGAT-AD 快速冒烟测试")
     print("=" * 50)
 
-    # ── 检查 mamba_ssm ────────────────────────────────────────────
+    # ── 检查 mamba_ssm（Windows 上没有是正常的）────────────────
     try:
         import mamba_ssm
-        print(f"[OK] mamba_ssm 导入成功  版本={mamba_ssm.__version__}")
-    except ImportError as e:
-        print(f"[FAIL] mamba_ssm 未安装: {e}")
-        print("       请运行：pip install causal-conv1d mamba-ssm --no-build-isolation")
-        return
+        print(f"[OK] mamba_ssm 可用  版本={mamba_ssm.__version__}（服务器模式）")
+    except ImportError:
+        print("[OK] mamba_ssm 未安装，将使用纯 PyTorch fallback（Windows 模式）")
 
     from models import MambGATAD, PredictionLoss
 
