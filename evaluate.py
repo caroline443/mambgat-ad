@@ -36,17 +36,15 @@ def evaluate(args):
     device = torch.device(device_str)
 
     # ── 数据 ──────────────────────────────────────────────────────
-    train_loader, test_loader, test_labels, channels = build_loaders(
+    train_loader, test_loader, test_labels, n_channels = build_loaders(
         data_dir    = cfg["data"]["data_dir"],
-        label_file  = cfg["data"]["label_file"],
         dataset     = cfg["data"]["dataset"],
         window_size = cfg["data"]["window_size"],
         train_step  = cfg["data"].get("window_step", 5),
         test_step   = cfg["data"].get("test_step", 1),
         batch_size  = cfg["train"]["batch_size"],
-        num_workers = 0,
+        num_workers = cfg["train"].get("num_workers", 0),
     )
-    n_channels  = len(channels)
     window_size = cfg["data"]["window_size"]
 
     # ── 模型 ──────────────────────────────────────────────────────
@@ -92,8 +90,8 @@ def evaluate(args):
     thresholder.fit(train_errors)
     _, global_pred = thresholder.predict(test_errors)
 
-    test_len    = len(global_pred)
-    labels_flat = test_labels[:test_len].any(axis=1).astype(int)
+    test_len     = len(global_pred)
+    labels_flat  = test_labels[:test_len].astype(int)
     global_score = test_errors.mean(axis=1)
 
     # ── 指标 ──────────────────────────────────────────────────────
@@ -112,27 +110,24 @@ def evaluate(args):
 
     # ── 可视化传感器耦合图 ────────────────────────────────────────
     if args.plot_graph:
-        _plot_adjacency(model, channels, out_dir, cfg["data"]["dataset"])
+        _plot_adjacency(model, n_channels, out_dir, cfg["data"]["dataset"])
 
     return metrics
 
 
-def _plot_adjacency(model, channels, out_dir, dataset_name):
+def _plot_adjacency(model, n_channels, out_dir, dataset_name):
     """绘制学习到的传感器耦合图（论文 Figure 用）"""
     try:
         import matplotlib.pyplot as plt
-        import matplotlib.colors as mcolors
 
         adj = model.get_graph(head_idx=0).numpy()  # (N, N)
-        N = len(channels)
+        N   = n_channels
 
-        fig, ax = plt.subplots(figsize=(max(8, N * 0.3), max(8, N * 0.3)))
+        fig, ax = plt.subplots(figsize=(max(8, N * 0.18), max(8, N * 0.18)))
         im = ax.imshow(adj, cmap="viridis", aspect="auto")
-        ax.set_xticks(range(N))
-        ax.set_yticks(range(N))
-        ax.set_xticklabels(channels, rotation=90, fontsize=6)
-        ax.set_yticklabels(channels, fontsize=6)
-        ax.set_title(f"MambGAT-AD 学习到的传感器耦合图\n({dataset_name.upper()})", pad=10)
+        ax.set_title(f"MambGAT-AD 学习到的传感器耦合图\n({dataset_name.upper()}, {N} 通道)", pad=10)
+        ax.set_xlabel("目标节点")
+        ax.set_ylabel("源节点")
         plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         plt.tight_layout()
 

@@ -5,8 +5,7 @@
 
 data:
   dataset: smap                   # smap | msl
-  data_dir: ./datasets/data       # Telemanom 格式数据目录 (train/ test/)
-  label_file: ./datasets/labeled_anomalies.csv
+  data_dir: ./datasets            # 存放 SMAP_train.npy / SMAP_test.npy / SMAP_test_label.npy
   window_size: 100                # 滑动窗口长度 T
   window_step: 5                  # 训练集滑动步长（减少冗余样本）
   test_step: 1                    # 测试集步长（逐点推理）

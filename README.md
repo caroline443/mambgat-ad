@@ -75,30 +75,25 @@ python train.py --config config/smap_win.yaml
 
 ### 准备数据（两端通用）
 
-```bash
-# Linux
-git clone https://github.com/khundman/telemanom
-mkdir -p datasets
-cp -r telemanom/data datasets/data
-cp telemanom/labeled_anomalies.csv datasets/
+**下载地址（Google Drive，公开，无需登录）：**
+> https://drive.google.com/drive/folders/1gisthCoE-RrKJ0j3KPV7xiibhHWT9qRm
+
+进入后下载 `SMAP` 文件夹，里面有 3 个文件：
+- `SMAP_train.npy`
+- `SMAP_test.npy`
+- `SMAP_test_label.npy`
+
+放到项目的 `datasets/` 目录：
+
+```
+mambgat-ad/
+  datasets/
+    SMAP_train.npy
+    SMAP_test.npy
+    SMAP_test_label.npy
 ```
 
-```batch
-:: Windows
-git clone https://github.com/khundman/telemanom
-mkdir datasets
-xcopy /E telemanom\data datasets\data\
-copy telemanom\labeled_anomalies.csv datasets\
-```
-
-数据目录结构：
-```
-datasets/
-  data/
-    train/   P-1.npy  S-1.npy  ...（55 个通道）
-    test/    P-1.npy  S-1.npy  ...
-  labeled_anomalies.csv
-```
+如果要同时跑 MSL，同样下载 `MSL` 文件夹的 3 个文件放入 `datasets/`。
 
 ### 评估
 

@@ -82,9 +82,8 @@ def train(cfg: dict):
     print(f"[Info] 使用设备: {device}")
 
     # ── 数据 ──────────────────────────────────────────────────────
-    train_loader, test_loader, test_labels, channels = build_loaders(
+    train_loader, test_loader, test_labels, n_channels = build_loaders(
         data_dir       = cfg["data"]["data_dir"],
-        label_file     = cfg["data"]["label_file"],
         dataset        = cfg["data"]["dataset"],
         window_size    = cfg["data"]["window_size"],
         train_step     = cfg["data"].get("window_step", 5),
@@ -93,7 +92,6 @@ def train(cfg: dict):
         normalize_data = cfg["data"].get("normalize", True),
         num_workers    = cfg["train"].get("num_workers", 4),
     )
-    n_channels  = len(channels)
     window_size = cfg["data"]["window_size"]
 
     # ── 模型 ──────────────────────────────────────────────────────
@@ -177,7 +175,7 @@ def train(cfg: dict):
                 "model_state": model.state_dict(),
                 "optimizer":   optimizer.state_dict(),
                 "cfg":         cfg,
-                "channels":    channels,
+                "n_channels":  n_channels,
             }, best_path)
             print(f"  ✓ 保存最佳模型 → {best_path}")
         else:
@@ -208,9 +206,9 @@ def train(cfg: dict):
     thresholder.fit(train_errors)
     per_channel_pred, global_pred = thresholder.predict(test_errors)
 
-    # 全局标签（任意通道异常 = 全局异常）
+    # 对齐长度（测试集滑窗后长度略短于原始序列）
     test_len     = len(global_pred)
-    labels_flat  = test_labels[:test_len].any(axis=1).astype(int)
+    labels_flat  = test_labels[:test_len].astype(int)
     global_score = test_errors.mean(axis=1)   # 平均误差作为全局分数
 
     metrics = evaluate_anomaly(

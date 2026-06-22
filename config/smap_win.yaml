@@ -6,8 +6,7 @@
 
 data:
   dataset: smap
-  data_dir: ./datasets/data
-  label_file: ./datasets/labeled_anomalies.csv
+  data_dir: ./datasets            # 存放 SMAP_train.npy / SMAP_test.npy / SMAP_test_label.npy
   window_size: 100
   window_step: 5
   test_step: 1
