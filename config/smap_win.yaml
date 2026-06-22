@@ -1,0 +1,41 @@
+# ──────────────────────────────────────────────
+# MambGAT-AD  |  SMAP / MSL 配置（Windows 版）
+# 针对 Windows + Anaconda + 原生 GPU 优化
+# num_workers=0，batch_size 适中，d_model 较小
+# ──────────────────────────────────────────────
+
+data:
+  dataset: smap
+  data_dir: ./datasets/data
+  label_file: ./datasets/labeled_anomalies.csv
+  window_size: 100
+  window_step: 5
+  test_step: 1
+  normalize: true
+
+model:
+  d_model: 64                     # Windows 建议从 64 开始，确认能跑后再调大
+  d_state: 16
+  d_conv: 4
+  expand: 2
+  n_heads: 4                      # 需整除 d_model
+  n_blocks: 2
+  dropout: 0.1
+  pred_len: 1
+
+train:
+  epochs: 30
+  batch_size: 64                  # Windows 显存有限，保守起步
+  lr: 1.0e-3
+  weight_decay: 1.0e-5
+  patience: 5
+  device: cuda                    # 改为 cpu 可在无 GPU 环境调试
+  seed: 42
+  save_dir: ./checkpoints
+  num_workers: 0                  # Windows 多进程有 bug，必须为 0
+
+threshold:
+  method: telemanom
+  p: 0.13
+  error_buffer: 100
+  percentile: 99.5

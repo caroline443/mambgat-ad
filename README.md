@@ -19,68 +19,92 @@
 
 ## 快速开始
 
-### 1. 安装环境（Linux 服务器 + V100）
+> **代码自动适配环境**：检测到 `mamba_ssm` 就用原生 CUDA kernel，否则自动 fallback 到纯 PyTorch，两端结果完全一致。
+
+---
+
+### 方式一：服务器（Linux + V100）
 
 ```bash
-# 克隆仓库
 git clone https://github.com/caroline443/mambgat-ad.git
 cd mambgat-ad
 
-# 建虚拟环境
+conda create -n mambgat python=3.10 -y && conda activate mambgat
+
+# 1. PyTorch（根据服务器 CUDA 版本选）
+pip install torch --index-url https://download.pytorch.org/whl/cu118
+
+# 2. mamba-ssm（顺序不能错，必须在 PyTorch 之后）
+pip install causal-conv1d mamba-ssm --no-build-isolation
+
+# 3. 其余依赖
+pip install -r requirements.txt
+
+# 验证（会打印 "[MambGAT] mamba_ssm 检测到 → 使用原生 CUDA kernel"）
+python sanity_check.py
+
+# 训练（用服务器配置）
+python train.py --config config/smap.yaml
+```
+
+---
+
+### 方式二：Windows + Anaconda
+
+```batch
+git clone https://github.com/caroline443/mambgat-ad.git
+cd mambgat-ad
+
 conda create -n mambgat python=3.10 -y
 conda activate mambgat
 
-# 1. 安装 PyTorch（根据服务器 CUDA 版本）
+:: 1. PyTorch（选对应显卡的 CUDA 版本）
 pip install torch --index-url https://download.pytorch.org/whl/cu118
 
-# 2. 安装 mamba-ssm（必须在 PyTorch 之后，需要 CUDA 编译）
-pip install causal-conv1d mamba-ssm --no-build-isolation
+:: 2. 其余依赖（跳过 mamba-ssm，代码自动 fallback）
+pip install -r requirements.txt
 
-# 3. 安装其余依赖
-pip install numpy pandas scikit-learn pyyaml tqdm einops matplotlib
+:: 验证（会打印 "[MambGAT] mamba_ssm 未找到 → 使用纯 PyTorch 实现"）
+python sanity_check.py
+
+:: 训练（用 Windows 配置，小 batch / num_workers=0）
+python train.py --config config/smap_win.yaml
 ```
 
-### 2. 准备数据（SMAP / MSL）
+---
+
+### 准备数据（两端通用）
 
 ```bash
-# 下载 Telemanom 数据集
+# Linux
 git clone https://github.com/khundman/telemanom
 mkdir -p datasets
 cp -r telemanom/data datasets/data
 cp telemanom/labeled_anomalies.csv datasets/
-
-# 目录结构：
-# datasets/
-#   data/
-#     train/  P-1.npy  S-1.npy  ...
-#     test/   P-1.npy  S-1.npy  ...
-#   labeled_anomalies.csv
 ```
 
-### 3. 验证环境（不需要真实数据）
-
-```bash
-python sanity_check.py
+```batch
+:: Windows
+git clone https://github.com/khundman/telemanom
+mkdir datasets
+xcopy /E telemanom\data datasets\data\
+copy telemanom\labeled_anomalies.csv datasets\
 ```
 
-### 4. 开始训练
-
-```bash
-# 训练 SMAP（V100 32GB，约 20-30 分钟）
-python train.py --config config/smap.yaml
-
-# 训练 MSL
-python train.py --config config/smap.yaml --dataset msl
-
-# 自定义参数
-python train.py --config config/smap.yaml --epochs 50 --lr 5e-4
+数据目录结构：
+```
+datasets/
+  data/
+    train/   P-1.npy  S-1.npy  ...（55 个通道）
+    test/    P-1.npy  S-1.npy  ...
+  labeled_anomalies.csv
 ```
 
-### 5. 评估
+### 评估
 
 ```bash
 python evaluate.py --ckpt checkpoints/best_smap.pt
-python evaluate.py --ckpt checkpoints/best_smap.pt --plot_graph  # 输出传感器耦合图
+python evaluate.py --ckpt checkpoints/best_smap.pt --plot_graph
 ```
 
 ---
