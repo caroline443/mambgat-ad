@@ -8,7 +8,7 @@ data:
   data_dir: ./datasets/archive/data        # 含 train/ test/ 子目录
   label_file: ./datasets/archive/labeled_anomalies.csv
   window_size: 100
-  window_step: 5
+  window_step: 1                    # 步长=1 最大化训练样本数（~2780个）
   test_step: 1
   normalize: true
 
@@ -24,7 +24,7 @@ model:
 
 train:
   epochs: 50
-  batch_size: 256
+  batch_size: 32                  # V100 32GB，纯PyTorch SSM显存较大，保守起步
   lr: 1.0e-3
   weight_decay: 1.0e-5
   patience: 7

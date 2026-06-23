@@ -61,7 +61,7 @@ def load_multivariate(
     data_dir: str,
     split: str,
     channels: List[str],
-    min_len: int = 110,          # 时间步少于此值的通道直接跳过（至少能出1个窗口）
+    min_len: int = 1000,         # 过滤极短通道（如 D-12=312步），保留完整长通道
 ) -> Tuple[np.ndarray, List[str]]:
     """
     加载所有通道并堆叠为多变量时间序列。
