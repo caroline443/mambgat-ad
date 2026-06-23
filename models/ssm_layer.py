@@ -87,14 +87,14 @@ class _SelectiveSSM(nn.Module):
         dt  = F.softplus(self.dt_proj(dt_raw)).clamp(min=1e-4, max=1.0)  # 防溢出
         A   = -torch.exp(self.A_log.float())
 
-        dA = torch.exp(dt.unsqueeze(-1) * A)               # (B,T,d_inner,d_state)
-        dB = dt.unsqueeze(-1) * B_ssm.unsqueeze(-2)        # (B,T,d_inner,d_state)
-
+        # 逐步计算 dA/dB（不一次性分配全 T 步，节省 B×T×d_inner×d_state 显存）
         h = x_in.new_zeros(B, self.d_inner, self.d_state)
         ys = []
         for t in range(T):
-            h  = dA[:, t] * h + dB[:, t] * x_in[:, t].unsqueeze(-1)
-            h  = h.clamp(-1e4, 1e4)                        # 防状态爆炸
+            dA_t = torch.exp(dt[:, t].unsqueeze(-1) * A)          # (B, d_inner, d_state)
+            dB_t = dt[:, t].unsqueeze(-1) * B_ssm[:, t].unsqueeze(-2)
+            h  = dA_t * h + dB_t * x_in[:, t].unsqueeze(-1)
+            h  = h.clamp(-1e4, 1e4)
             ys.append((h * C_ssm[:, t].unsqueeze(-2)).sum(-1))
         y = torch.stack(ys, dim=1) + self.D * x_in
         y = torch.nan_to_num(y, nan=0.0, posinf=1e4, neginf=-1e4)  # 最后保险
