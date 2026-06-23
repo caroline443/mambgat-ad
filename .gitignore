@@ -15,10 +15,8 @@ venv/
 env/
 .conda/
 
-# 数据（体积太大，不入库）
-datasets/
-*.npy
-*.csv
+# 模型 checkpoint 和结果（本地保留，不入库）
+# datasets/ 中的数据可以入库（总量 < 100MB，无需 LFS）
 
 # 模型 checkpoint（本地保留，不入库）
 checkpoints/
