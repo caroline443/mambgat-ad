@@ -144,13 +144,19 @@ class PerChannelThreshold:
     def __init__(self, method: str = "telemanom", **kwargs):
         assert method in ("telemanom", "percentile")
         self.method = method
-        self.kwargs = kwargs
+        # 按方法分别保存参数，避免传入不认识的 kwarg
+        self.telemanom_kwargs = {
+            k: v for k, v in kwargs.items() if k in ("p", "error_buffer")
+        }
+        self.percentile_kwargs = {
+            k: v for k, v in kwargs.items() if k in ("percentile",)
+        }
         self.thresholds = []
 
     def _make(self):
         if self.method == "telemanom":
-            return TelemanomThreshold(**self.kwargs)
-        return PercentileThreshold(**self.kwargs)
+            return TelemanomThreshold(**self.telemanom_kwargs)
+        return PercentileThreshold(**self.percentile_kwargs)
 
     def fit(self, train_errors: np.ndarray) -> "PerChannelThreshold":
         """
