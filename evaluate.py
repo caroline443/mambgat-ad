@@ -44,7 +44,7 @@ def evaluate(args):
         train_step  = cfg["data"].get("window_step", 5),
         test_step   = cfg["data"].get("test_step", 1),
         batch_size  = cfg["train"]["batch_size"],
-        num_workers = cfg["train"].get("num_workers", 0),
+        num_workers = 0,   # 评估时强制 0，避免 WSL/Windows 多进程死锁
     )
     window_size = cfg["data"]["window_size"]
 
