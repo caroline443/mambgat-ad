@@ -5,7 +5,7 @@
 data:
   dataset: smap
   format: AT
-  data_dir: ./datasets/AT
+  data_dir: ./datasets/AT/SMAP
   label_file: null
   window_size: 100
   window_step: 1

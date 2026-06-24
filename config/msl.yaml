@@ -5,7 +5,7 @@
 data:
   dataset: msl
   format: AT
-  data_dir: ./datasets/AT
+  data_dir: ./datasets/AT/MSL
   label_file: null
   window_size: 100
   window_step: 1
