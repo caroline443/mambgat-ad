@@ -24,7 +24,7 @@ model:
 
 train:
   epochs: 50
-  batch_size: 128
+  batch_size: 32                       # N=55，GAT矩阵是SMAP的4.8x，需要小batch
   lr: 1.0e-3
   weight_decay: 1.0e-5
   patience: 7
