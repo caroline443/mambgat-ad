@@ -129,18 +129,32 @@ def train(cfg: dict):
     save_dir = Path(cfg["train"]["save_dir"])
     save_dir.mkdir(parents=True, exist_ok=True)
     best_path = save_dir / f"best_{cfg['data']['dataset']}.pt"
+    last_path = save_dir / f"last_{cfg['data']['dataset']}.pt"   # 每轮覆盖，用于断点续跑
 
-    # ── 训练循环 ──────────────────────────────────────────────────
+    # ── 断点恢复 ──────────────────────────────────────────────────
+    start_epoch   = 1
     best_val_loss = float("inf")
     patience_cnt  = 0
-    patience      = cfg["train"]["patience"]
+
+    if args.resume and last_path.exists():
+        print(f"  [Resume] 从 {last_path} 恢复训练...")
+        ckpt = torch.load(last_path, map_location=device)
+        model.load_state_dict(ckpt["model_state"])
+        optimizer.load_state_dict(ckpt["optimizer"])
+        start_epoch   = ckpt["epoch"] + 1
+        best_val_loss = ckpt.get("best_val_loss", float("inf"))
+        patience_cnt  = ckpt.get("patience_cnt", 0)
+        print(f"  [Resume] 从 Epoch {start_epoch} 继续，已有 best_loss={best_val_loss:.5f}")
+
+    patience = cfg["train"]["patience"]
 
     print(f"\n{'═'*60}")
     print(f"  开始训练  |  数据集={cfg['data']['dataset'].upper()}"
-          f"  |  epochs={cfg['train']['epochs']}")
+          f"  |  epochs={cfg['train']['epochs']}"
+          f"  |  从 epoch {start_epoch} 开始")
     print(f"{'═'*60}")
 
-    for epoch in range(1, cfg["train"]["epochs"] + 1):
+    for epoch in range(start_epoch, cfg["train"]["epochs"] + 1):
         # ── Train ──────────────────────────────────────────────
         model.train()
         train_losses = []
@@ -172,33 +186,34 @@ def train(cfg: dict):
 
         # 早停（基于 train loss）
         is_nan = np.isnan(avg_loss)
-        if is_nan:
-            print(f"  [WARN] loss=nan，跳过本轮保存，检查数据或降低学习率")
-        elif avg_loss < best_val_loss:
-            best_val_loss = avg_loss
-            patience_cnt  = 0
-            torch.save({
-                "epoch":       epoch,
-                "model_state": model.state_dict(),
-                "optimizer":   optimizer.state_dict(),
-                "cfg":         cfg,
-                "n_channels":  n_channels,
-            }, best_path)
-            print(f"  ✓ 保存最佳模型 → {best_path}")
-        else:
-            patience_cnt += 1
-            if patience_cnt >= patience:
-                print(f"\n  早停触发（{patience} 轮无改善）")
-                break
+        ckpt_data = {
+            "epoch":         epoch,
+            "model_state":   model.state_dict(),
+            "optimizer":     optimizer.state_dict(),
+            "cfg":           cfg,
+            "n_channels":    n_channels,
+            "best_val_loss": best_val_loss,
+            "patience_cnt":  patience_cnt,
+        }
 
-        if not best_path.exists():
-            # 第一个有效 epoch 强制保存，避免后续评估 FileNotFoundError
-            if not is_nan:
-                torch.save({
-                    "epoch": epoch, "model_state": model.state_dict(),
-                    "optimizer": optimizer.state_dict(),
-                    "cfg": cfg, "n_channels": n_channels,
-                }, best_path)
+        if is_nan:
+            print(f"  [WARN] loss=nan，跳过本轮保存")
+        else:
+            # 每轮保存 last checkpoint（断点续跑用）
+            torch.save(ckpt_data, last_path)
+
+            if avg_loss < best_val_loss:
+                best_val_loss          = avg_loss
+                patience_cnt           = 0
+                ckpt_data["best_val_loss"] = best_val_loss
+                ckpt_data["patience_cnt"]  = patience_cnt
+                torch.save(ckpt_data, best_path)
+                print(f"  ✓ 保存最佳模型 → {best_path}")
+            else:
+                patience_cnt += 1
+                if patience_cnt >= patience:
+                    print(f"\n  早停触发（{patience} 轮无改善）")
+                    break
 
     # ── 评估 ──────────────────────────────────────────────────────
     print(f"\n{'═'*60}")
@@ -290,11 +305,12 @@ def _collect_errors(
 def parse_args():
     parser = argparse.ArgumentParser(description="MambGAT-AD 训练脚本")
     parser.add_argument("--config",     default="config/smap.yaml", help="配置文件路径")
-    parser.add_argument("--dataset",    default=None,  choices=["smap", "msl"], help="数据集")
+    parser.add_argument("--dataset",    default=None,  choices=["smap", "msl", "smd"], help="数据集")
     parser.add_argument("--epochs",     default=None,  type=int,   help="训练轮数")
     parser.add_argument("--batch_size", default=None,  type=int,   help="批大小")
     parser.add_argument("--lr",         default=None,  type=float, help="学习率")
     parser.add_argument("--device",     default=None,  choices=["cuda", "cpu"], help="设备")
+    parser.add_argument("--resume",     action="store_true",       help="从 last checkpoint 断点续跑")
     return parser.parse_args()
 
 
