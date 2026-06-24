@@ -26,7 +26,7 @@ from utils.threshold import PerChannelThreshold
 
 def evaluate(args):
     # ── 加载 checkpoint ───────────────────────────────────────────
-    ckpt   = torch.load(args.ckpt, map_location="cpu")
+    ckpt   = torch.load(args.ckpt, map_location="cpu", weights_only=False)
     cfg    = ckpt["cfg"]
     channels = ckpt.get("channels", [])
 

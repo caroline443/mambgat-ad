@@ -138,7 +138,7 @@ def train(cfg: dict):
 
     if args.resume and last_path.exists():
         print(f"  [Resume] 从 {last_path} 恢复训练...")
-        ckpt = torch.load(last_path, map_location=device)
+        ckpt = torch.load(last_path, map_location=device, weights_only=False)
         model.load_state_dict(ckpt["model_state"])
         optimizer.load_state_dict(ckpt["optimizer"])
         start_epoch   = ckpt["epoch"] + 1
@@ -218,7 +218,7 @@ def train(cfg: dict):
     # ── 评估 ──────────────────────────────────────────────────────
     print(f"\n{'═'*60}")
     print("  加载最佳模型进行测试集评估 ...")
-    ckpt = torch.load(best_path, map_location=device)
+    ckpt = torch.load(best_path, map_location=device, weights_only=False)
     model.load_state_dict(ckpt["model_state"])
 
     # 收集训练集误差（用于拟合阈值）
