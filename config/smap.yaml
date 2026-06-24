@@ -1,14 +1,16 @@
-# ──────────────────────────────────────────────
-# MambGAT-AD  |  SMAP / MSL 配置（服务器 V100-32GB）
-# 数据来源：Kaggle patrickfleith/nasa-anomaly-detection-dataset-smap-msl
-# ──────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────
+# MambGAT-AD | SMAP 主实验配置（Anomaly Transformer 格式）
+# 与 GDN、OmniAnomaly、Anomaly Transformer 等论文直接可比
+# 数据：https://drive.google.com/drive/folders/1gisthCoE-RrKJ0j3KPV7xiibhHWT9qRm
+# ──────────────────────────────────────────────────────────────
 
 data:
-  dataset: smap                            # smap | msl
-  data_dir: ./datasets/archive/data        # 含 train/ test/ 子目录
-  label_file: ./datasets/archive/labeled_anomalies.csv
+  dataset: smap
+  format: AT                           # AT | telemanom
+  data_dir: ./datasets/AT              # 存放 SMAP_train.npy / SMAP_test.npy / SMAP_test_label.npy
+  label_file: null                     # AT格式不需要
   window_size: 100
-  window_step: 1                    # 步长=1 最大化训练样本数（~2780个）
+  window_step: 1
   test_step: 1
   normalize: true
 
@@ -24,7 +26,7 @@ model:
 
 train:
   epochs: 50
-  batch_size: 32                  # V100 32GB，纯PyTorch SSM显存较大，保守起步
+  batch_size: 128                      # 原生 mamba-ssm，V100 32GB 可用
   lr: 1.0e-3
   weight_decay: 1.0e-5
   patience: 7
@@ -34,7 +36,5 @@ train:
   num_workers: 4
 
 threshold:
-  method: telemanom
-  p: 0.13
-  error_buffer: 100
+  method: percentile
   percentile: 99.5

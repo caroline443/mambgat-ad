@@ -83,12 +83,14 @@ def train(cfg: dict):
     print(f"[Info] 使用设备: {device}")
 
     # ── 数据 ──────────────────────────────────────────────────────
+    data_fmt = cfg["data"].get("format", "AT").upper()
     train_loader, test_loader, test_labels, n_channels = build_loaders(
         data_dir       = cfg["data"]["data_dir"],
-        label_file     = cfg["data"]["label_file"],
         dataset        = cfg["data"]["dataset"],
+        fmt            = data_fmt,
+        label_file     = cfg["data"].get("label_file"),
         window_size    = cfg["data"]["window_size"],
-        train_step     = cfg["data"].get("window_step", 5),
+        train_step     = cfg["data"].get("window_step", 1),
         test_step      = cfg["data"].get("test_step", 1),
         batch_size     = cfg["train"]["batch_size"],
         normalize_data = cfg["data"].get("normalize", True),
@@ -209,51 +211,55 @@ def train(cfg: dict):
     # 收集测试集误差
     test_errors  = _collect_errors(model, test_loader,  device)
 
-    # ── 逐通道评估（标准 SMAP 协议）────────────────────────────
+    # ── 评估 ─────────────────────────────────────────────────────
+    import json
     thr_cfg    = cfg.get("threshold", {})
     percentile = thr_cfg.get("percentile", 99.5)
     test_len   = len(test_errors)
+    dataset_name = cfg['data']['dataset'].upper()
 
-    # per_channel_labels: (T_test, N)
-    per_ch_labels = test_labels[:test_len]   # 已经是 (T, N) 逐通道标签
+    if data_fmt == "AT":
+        # ── AT 格式：全局评估（与主流论文直接可比）─────────────
+        global_label = test_labels[:test_len].astype(int)   # (T,) 全局标签
+        global_score = test_errors.mean(axis=1)             # 全局分数
+        thr = float(np.percentile(train_errors.mean(axis=1), percentile))
+        global_pred  = (global_score > thr).astype(int)
 
-    print("  逐通道评估（宏平均）...")
-    metrics = evaluate_per_channel(
-        per_channel_labels = per_ch_labels,
-        test_errors        = test_errors,
-        train_errors       = train_errors,
-        percentile         = percentile,
-    )
-    print_metrics(
-        metrics,
-        prefix=f"MambGAT-AD on {cfg['data']['dataset'].upper()} "
-               f"[逐通道宏平均]"
-    )
+        metrics = evaluate_anomaly(
+            y_true=global_label, y_pred=global_pred,
+            y_score=global_score, use_pa=True,
+        )
+        print_metrics(metrics,
+                      prefix=f"MambGAT-AD on {dataset_name} [全局评估，AT格式]")
+        all_results = {k: round(float(v), 6) for k, v in metrics.items()}
 
-    # ── 附加：全局参考指标（OR 合并，仅供参考）──────────────────
-    global_label = per_ch_labels.any(axis=1).astype(int)
-    global_score = test_errors.max(axis=1)    # 最大通道误差作为全局分数
-    global_metrics = evaluate_anomaly(
-        y_true=global_label,
-        y_pred=(global_score > np.percentile(train_errors.max(axis=1),
-                                              percentile)).astype(int),
-        y_score=global_score,
-        use_pa=True,
-    )
-    print_metrics(
-        global_metrics,
-        prefix="全局参考指标 (OR 合并，仅参考)"
-    )
+    else:
+        # ── Telemanom 格式：逐通道宏平均 ────────────────────────
+        per_ch_labels = test_labels[:test_len]   # (T, N)
+        metrics = evaluate_per_channel(
+            per_channel_labels=per_ch_labels,
+            test_errors=test_errors,
+            train_errors=train_errors,
+            percentile=percentile,
+        )
+        print_metrics(metrics,
+                      prefix=f"MambGAT-AD on {dataset_name} [逐通道宏平均]")
 
-    # ── 保存结果 ─────────────────────────────────────────────────
-    import json
+        # 全局参考
+        global_score = test_errors.max(axis=1)
+        thr = float(np.percentile(train_errors.max(axis=1), percentile))
+        global_metrics = evaluate_anomaly(
+            y_true=per_ch_labels.any(1).astype(int),
+            y_pred=(global_score > thr).astype(int),
+            y_score=global_score, use_pa=True,
+        )
+        print_metrics(global_metrics, prefix="全局参考 (OR合并)")
+        all_results = {
+            "per_channel_macro": {k: round(float(v), 6) for k, v in metrics.items()},
+            "global_reference":  {k: round(float(v), 6) for k, v in global_metrics.items()},
+        }
+
     result_path = save_dir / f"results_{cfg['data']['dataset']}.json"
-    all_results = {
-        "per_channel_macro": {k: round(float(v), 6)
-                               for k, v in metrics.items()},
-        "global_reference":  {k: round(float(v), 6)
-                               for k, v in global_metrics.items()},
-    }
     with open(result_path, "w", encoding="utf-8") as f:
         json.dump(all_results, f, indent=2)
     print(f"\n  结果已保存 → {result_path}")

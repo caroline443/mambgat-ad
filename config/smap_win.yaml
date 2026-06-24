@@ -1,14 +1,14 @@
-# ──────────────────────────────────────────────
-# MambGAT-AD  |  SMAP / MSL 配置（Windows 本机）
-# 数据来源：Kaggle patrickfleith/nasa-anomaly-detection-dataset-smap-msl
-# ──────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────
+# MambGAT-AD | SMAP Windows 配置（AT 格式）
+# ──────────────────────────────────────────────────────────────
 
 data:
-  dataset: smap                            # smap | msl
-  data_dir: ./datasets/archive/data        # 含 train/ test/ 子目录
-  label_file: ./datasets/archive/labeled_anomalies.csv
+  dataset: smap
+  format: AT
+  data_dir: ./datasets/AT
+  label_file: null
   window_size: 100
-  window_step: 5
+  window_step: 1
   test_step: 1
   normalize: true
 
@@ -17,24 +17,22 @@ model:
   d_state: 16
   d_conv: 4
   expand: 2
-  n_heads: 4                               # 需整除 d_model
+  n_heads: 4
   n_blocks: 2
   dropout: 0.1
   pred_len: 1
 
 train:
   epochs: 30
-  batch_size: 64
+  batch_size: 32
   lr: 1.0e-3
   weight_decay: 1.0e-5
   patience: 5
-  device: cuda                             # 改为 cpu 可在无 GPU 下调试
+  device: cuda
   seed: 42
   save_dir: ./checkpoints
-  num_workers: 0                           # Windows 必须为 0
+  num_workers: 0
 
 threshold:
-  method: telemanom
-  p: 0.13
-  error_buffer: 100
+  method: percentile
   percentile: 99.5
