@@ -1,0 +1,38 @@
+# ──────────────────────────────────────────────────────────────
+# MambGAT-AD | MSL 配置（好奇号火星车，AT 格式）
+# ──────────────────────────────────────────────────────────────
+
+data:
+  dataset: msl
+  format: AT
+  data_dir: ./datasets/AT
+  label_file: null
+  window_size: 100
+  window_step: 1
+  test_step: 1
+  normalize: true
+
+model:
+  d_model: 128
+  d_state: 16
+  d_conv: 4
+  expand: 2
+  n_heads: 8
+  n_blocks: 3
+  dropout: 0.1
+  pred_len: 1
+
+train:
+  epochs: 50
+  batch_size: 128
+  lr: 1.0e-3
+  weight_decay: 1.0e-5
+  patience: 7
+  device: cuda
+  seed: 42
+  save_dir: ./checkpoints
+  num_workers: 4
+
+threshold:
+  method: percentile
+  percentile: 99.5
