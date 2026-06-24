@@ -80,33 +80,39 @@ def evaluate(args):
     train_errors = collect(train_loader)
     test_errors  = collect(test_loader)
 
-    # ── 阈值与预测 ────────────────────────────────────────────────
-    thr_cfg = cfg.get("threshold", {})
-    thresholder = PerChannelThreshold(
-        method       = thr_cfg.get("method", "telemanom"),
-        p            = thr_cfg.get("p", 0.13),
-        error_buffer = thr_cfg.get("error_buffer", 100),
-        percentile   = thr_cfg.get("percentile", 99.5),
-    )
-    thresholder.fit(train_errors)
-    _, global_pred = thresholder.predict(test_errors)
+    # ── 评估（与 train.py 完全一致）──────────────────────────────
+    import json as _json
+    data_fmt     = cfg["data"].get("format", "AT").upper()
+    percentile   = cfg.get("threshold", {}).get("percentile", 99.5)
+    dataset_name = cfg["data"]["dataset"]
+    test_len     = len(test_errors)
+    out_dir      = Path(args.ckpt).parent
 
-    test_len     = len(global_pred)
-    labels_flat  = test_labels[:test_len].astype(int)
-    global_score = test_errors.mean(axis=1)
+    if data_fmt == "AT":
+        global_label = test_labels[:test_len].astype(int)
+        global_score = test_errors.mean(axis=1)
+        thr          = float(np.percentile(train_errors.mean(axis=1), percentile))
+        global_pred  = (global_score > thr).astype(int)
 
-    # ── 指标 ──────────────────────────────────────────────────────
-    metrics = evaluate_anomaly(
-        y_true=labels_flat, y_pred=global_pred,
-        y_score=global_score, use_pa=True,
-    )
-    print_metrics(metrics, prefix=f"MambGAT-AD [{cfg['data']['dataset'].upper()}]")
+        metrics = evaluate_anomaly(
+            y_true=global_label, y_pred=global_pred,
+            y_score=global_score, use_pa=True,
+            dataset=dataset_name,
+        )
+        print_metrics(metrics, prefix=f"MambGAT-AD [{dataset_name.upper()}] [全局, AT格式]")
+        all_results = {k: round(float(v), 6) for k, v in metrics.items()}
+    else:
+        from utils.metrics import evaluate_per_channel
+        per_ch_labels = test_labels[:test_len]
+        metrics = evaluate_per_channel(
+            per_ch_labels, test_errors, train_errors, percentile)
+        print_metrics(metrics, prefix=f"MambGAT-AD [{dataset_name.upper()}] [逐通道]")
+        all_results = {k: round(float(v), 6) for k, v in metrics.items()
+                       if isinstance(v, (int, float))}
 
-    # ── 保存结果 ──────────────────────────────────────────────────
-    out_dir  = Path(args.ckpt).parent
-    out_path = out_dir / f"eval_{cfg['data']['dataset']}.json"
+    out_path = out_dir / f"eval_{dataset_name}.json"
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump({k: round(float(v), 6) for k, v in metrics.items()}, f, indent=2)
+        _json.dump(all_results, f, indent=2)
     print(f"[Eval] 结果保存至 {out_path}")
 
     # ── 可视化传感器耦合图 ────────────────────────────────────────
