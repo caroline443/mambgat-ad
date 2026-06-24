@@ -90,8 +90,14 @@ def evaluate(args):
 
     if data_fmt == "AT":
         global_label = test_labels[:test_len].astype(int)
-        global_score = test_errors.max(axis=1)              # max：保留最异常通道信号
-        thr          = float(np.percentile(train_errors.max(axis=1), percentile))
+        # GDN 风格 IQR 归一化（Deng & Hooi, AAAI 2021）
+        tr_median = np.median(train_errors, axis=0, keepdims=True)
+        tr_iqr    = (np.percentile(train_errors, 75, axis=0, keepdims=True)
+                     - np.percentile(train_errors, 25, axis=0, keepdims=True) + 0.01)
+        z_test    = np.abs(test_errors  - tr_median) / tr_iqr
+        z_train   = np.abs(train_errors - tr_median) / tr_iqr
+        global_score = z_test.max(axis=1)
+        thr          = float(np.percentile(z_train.max(axis=1), percentile))
         global_pred  = (global_score > thr).astype(int)
 
         metrics = evaluate_anomaly(

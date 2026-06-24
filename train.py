@@ -235,9 +235,20 @@ def train(cfg: dict):
 
     if data_fmt == "AT":
         # ── AT 格式：全局评估（与主流论文直接可比）─────────────
-        global_label = test_labels[:test_len].astype(int)   # (T,) 全局标签
-        global_score = test_errors.max(axis=1)              # max：保留最异常通道的信号
-        thr = float(np.percentile(train_errors.max(axis=1), percentile))
+        global_label = test_labels[:test_len].astype(int)
+
+        # GDN 风格 IQR 归一化（Deng & Hooi, AAAI 2021）
+        # score_i = |err_i - median_train_i| / IQR_train_i
+        # 使各通道量级统一，消除"天然高误差通道"对 max 聚合的主导
+        tr_median = np.median(train_errors, axis=0, keepdims=True)
+        tr_iqr    = (np.percentile(train_errors, 75, axis=0, keepdims=True)
+                     - np.percentile(train_errors, 25, axis=0, keepdims=True) + 0.01)
+
+        z_test  = np.abs(test_errors  - tr_median) / tr_iqr
+        z_train = np.abs(train_errors - tr_median) / tr_iqr
+
+        global_score = z_test.max(axis=1)
+        thr          = float(np.percentile(z_train.max(axis=1), percentile))
         global_pred  = (global_score > thr).astype(int)
 
         metrics = evaluate_anomaly(
