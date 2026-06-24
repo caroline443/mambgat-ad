@@ -147,7 +147,7 @@ class MambGATAD(nn.Module):
         获取学习到的传感器耦合图（用于论文可视化）。
         返回 (N, N) 邻接矩阵
         """
-        return self.encoder.blocks[0].spatial.get_adjacency(head_idx)
+        return self.encoder.blocks[0].spatial.get_adjacency(head_idx=head_idx)
 
     # ─────────────────────────────────────────────────────────────────
     def count_parameters(self) -> int:
