@@ -90,8 +90,8 @@ def evaluate(args):
 
     if data_fmt == "AT":
         global_label = test_labels[:test_len].astype(int)
-        global_score = test_errors.mean(axis=1)
-        thr          = float(np.percentile(train_errors.mean(axis=1), percentile))
+        global_score = test_errors.max(axis=1)              # max：保留最异常通道信号
+        thr          = float(np.percentile(train_errors.max(axis=1), percentile))
         global_pred  = (global_score > thr).astype(int)
 
         metrics = evaluate_anomaly(

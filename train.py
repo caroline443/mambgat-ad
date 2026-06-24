@@ -236,8 +236,8 @@ def train(cfg: dict):
     if data_fmt == "AT":
         # ── AT 格式：全局评估（与主流论文直接可比）─────────────
         global_label = test_labels[:test_len].astype(int)   # (T,) 全局标签
-        global_score = test_errors.mean(axis=1)             # 全局分数
-        thr = float(np.percentile(train_errors.mean(axis=1), percentile))
+        global_score = test_errors.max(axis=1)              # max：保留最异常通道的信号
+        thr = float(np.percentile(train_errors.max(axis=1), percentile))
         global_pred  = (global_score > thr).astype(int)
 
         metrics = evaluate_anomaly(
