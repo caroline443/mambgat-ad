@@ -66,19 +66,21 @@ def evaluate(args):
     model.eval()
     print(f"[Eval] 加载 checkpoint: {args.ckpt}  (epoch {ckpt.get('epoch','?')})")
 
-    # ── 收集误差 ──────────────────────────────────────────────────
-    def collect(loader):
+    # ── 收集误差（带进度条）──────────────────────────────────────
+    from tqdm import tqdm
+
+    def collect(loader, desc="推理"):
         all_s = []
         with torch.no_grad():
-            for x, _ in loader:
+            for x, _ in tqdm(loader, desc=f"[Eval] {desc}",
+                              ncols=80, unit="batch"):
                 x = x.to(device, dtype=torch.float32)
                 _, s = model(x)
                 all_s.append(s.cpu().numpy())
         return np.concatenate(all_s, axis=0)
 
-    print("[Eval] 推理中 ...")
-    train_errors = collect(train_loader)
-    test_errors  = collect(test_loader)
+    train_errors = collect(train_loader, "训练集")
+    test_errors  = collect(test_loader,  "测试集")
 
     # ── 评估（与 train.py 完全一致）──────────────────────────────
     import json as _json

@@ -1,11 +1,12 @@
 # ──────────────────────────────────────────────────────────────
-# MambGAT-AD | SMAP Windows 配置（AT 格式）
+# MambGAT-AD | SMAP WSL 配置（A4000-16GB + 原生 mamba-ssm）
+# 数据建议复制到 WSL 本地，不要用 /mnt/f/ 软链接（I/O 慢 3-5x）
 # ──────────────────────────────────────────────────────────────
 
 data:
   dataset: smap
   format: AT
-  data_dir: ./datasets/AT/SMAP
+  data_dir: ./datasets/AT/SMAP   # WSL 本地路径（复制后）
   label_file: null
   window_size: 100
   window_step: 1
@@ -13,25 +14,25 @@ data:
   normalize: true
 
 model:
-  d_model: 64
+  d_model: 128                   # 和服务器一样，A4000 16GB 够用
   d_state: 16
   d_conv: 4
   expand: 2
-  n_heads: 4
-  n_blocks: 2
+  n_heads: 8
+  n_blocks: 3
   dropout: 0.1
   pred_len: 1
 
 train:
-  epochs: 30
-  batch_size: 32
+  epochs: 50
+  batch_size: 64                 # A4000 保守用 64（SMAP N=25 很省显存）
   lr: 1.0e-3
   weight_decay: 1.0e-5
-  patience: 5
+  patience: 7
   device: cuda
   seed: 42
   save_dir: ./checkpoints
-  num_workers: 0
+  num_workers: 0                 # WSL 必须 0
 
 threshold:
   method: percentile
