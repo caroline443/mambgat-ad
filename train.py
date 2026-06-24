@@ -31,6 +31,7 @@ from tqdm import tqdm
 from data import build_loaders
 from models import MambGATAD, PredictionLoss
 from utils import evaluate_anomaly, print_metrics
+from utils.metrics import evaluate_per_channel
 from utils.threshold import PerChannelThreshold
 
 
@@ -208,35 +209,53 @@ def train(cfg: dict):
     # 收集测试集误差
     test_errors  = _collect_errors(model, test_loader,  device)
 
-    # 拟合阈值
-    thr_cfg = cfg.get("threshold", {})
-    thresholder = PerChannelThreshold(
-        method       = thr_cfg.get("method", "telemanom"),
-        p            = thr_cfg.get("p", 0.13),
-        error_buffer = thr_cfg.get("error_buffer", 100),
-        percentile   = thr_cfg.get("percentile", 99.5),
+    # ── 逐通道评估（标准 SMAP 协议）────────────────────────────
+    thr_cfg    = cfg.get("threshold", {})
+    percentile = thr_cfg.get("percentile", 99.5)
+    test_len   = len(test_errors)
+
+    # per_channel_labels: (T_test, N)
+    per_ch_labels = test_labels[:test_len]   # 已经是 (T, N) 逐通道标签
+
+    print("  逐通道评估（宏平均）...")
+    metrics = evaluate_per_channel(
+        per_channel_labels = per_ch_labels,
+        test_errors        = test_errors,
+        train_errors       = train_errors,
+        percentile         = percentile,
     )
-    thresholder.fit(train_errors)
-    per_channel_pred, global_pred = thresholder.predict(test_errors)
+    print_metrics(
+        metrics,
+        prefix=f"MambGAT-AD on {cfg['data']['dataset'].upper()} "
+               f"[逐通道宏平均]"
+    )
 
-    # 对齐长度（测试集滑窗后长度略短于原始序列）
-    test_len     = len(global_pred)
-    labels_flat  = test_labels[:test_len].astype(int)
-    global_score = test_errors.mean(axis=1)   # 平均误差作为全局分数
-
-    metrics = evaluate_anomaly(
-        y_true=labels_flat,
-        y_pred=global_pred,
+    # ── 附加：全局参考指标（OR 合并，仅供参考）──────────────────
+    global_label = per_ch_labels.any(axis=1).astype(int)
+    global_score = test_errors.max(axis=1)    # 最大通道误差作为全局分数
+    global_metrics = evaluate_anomaly(
+        y_true=global_label,
+        y_pred=(global_score > np.percentile(train_errors.max(axis=1),
+                                              percentile)).astype(int),
         y_score=global_score,
         use_pa=True,
     )
-    print_metrics(metrics, prefix=f"MambGAT-AD on {cfg['data']['dataset'].upper()}")
+    print_metrics(
+        global_metrics,
+        prefix="全局参考指标 (OR 合并，仅参考)"
+    )
 
-    # 保存评估结果
+    # ── 保存结果 ─────────────────────────────────────────────────
     import json
     result_path = save_dir / f"results_{cfg['data']['dataset']}.json"
+    all_results = {
+        "per_channel_macro": {k: round(float(v), 6)
+                               for k, v in metrics.items()},
+        "global_reference":  {k: round(float(v), 6)
+                               for k, v in global_metrics.items()},
+    }
     with open(result_path, "w", encoding="utf-8") as f:
-        json.dump({k: round(float(v), 6) for k, v in metrics.items()}, f, indent=2)
+        json.dump(all_results, f, indent=2)
     print(f"\n  结果已保存 → {result_path}")
 
     return metrics
