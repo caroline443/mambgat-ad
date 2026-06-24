@@ -18,11 +18,19 @@ TARGET=${1:-"all"}
 run_model() {
     local dataset=$1
     local config="config/${dataset}.yaml"
+    local resume_flag=""
+
+    # 自动检测 last checkpoint，有就续跑
+    if [ -f "checkpoints/last_${dataset}.pt" ]; then
+        echo "  [Resume] 检测到 last_${dataset}.pt，自动续跑"
+        resume_flag="--resume"
+    fi
+
     echo ""
     echo "════════════════════════════════════════════"
     echo "  MambGAT-AD | ${dataset^^} | $(date '+%H:%M:%S')"
     echo "════════════════════════════════════════════"
-    python train.py --config "$config" 2>&1 | tee "${LOG_DIR}/train_${dataset}.log"
+    python train.py --config "$config" $resume_flag 2>&1 | tee "${LOG_DIR}/train_${dataset}.log"
     echo "✓ ${dataset^^} 训练完成"
 }
 
