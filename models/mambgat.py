@@ -98,15 +98,8 @@ class MambGATAD(nn.Module):
             nn.Linear(d_model // 2, pred_len),
         )
 
-        # ── 5. 重建头（所有时间步 → 重建输入窗口）──────────────────
-        # 参考 ContrastAD 的多路残差，重建误差提供额外异常信号
-        # 计算量极小（一个线性层），训练仅慢 ~5%
-        self.recon_head = nn.Sequential(
-            nn.LayerNorm(d_model),
-            nn.Linear(d_model, d_model // 2),
-            nn.GELU(),
-            nn.Linear(d_model // 2, 1),   # 每通道每时刻重建为标量
-        )
+        # ── 5. 重建头（轻量单层，减少计算开销）──────────────────────
+        self.recon_head = nn.Linear(d_model, 1)   # D → 1，最小开销
 
         self._init_weights()
 

@@ -9,7 +9,7 @@ data:
   data_dir: ./datasets/AT/SMAP   # WSL 本地路径（复制后）
   label_file: null
   window_size: 100
-  window_step: 1
+  window_step: 5                 # GDN 标准设置，结果可靠，速度 5x
   test_step: 1
   normalize: true
 
