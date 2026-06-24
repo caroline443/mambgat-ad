@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from sklearn.metrics import (
@@ -117,7 +117,7 @@ def anomaly_ratio_threshold(
         ratio:   异常比例，如 0.1313 表示 13.13%
     """
     if ratio is None:
-        ratio = ANOMALY_RATIO.get(dataset.lower(), y_true.mean())
+        ratio = ANOMALY_RATIO.get(dataset.lower() if dataset else '', y_true.mean())
     thr   = np.percentile(y_score, 100 * (1 - ratio))
     return (y_score > thr).astype(int)
 
@@ -268,7 +268,7 @@ def evaluate_anomaly(
             _, best_f1 = best_f1_threshold(y_true, y_score)
             results["f1_pa_best"] = best_f1
         # anomaly-ratio 阈值（Anomaly Transformer / ContrastAD 协议，可直接对标论文）
-        if dataset is not None or y_score is not None:
+        if dataset is not None:
             y_pred_ar = anomaly_ratio_threshold(y_true, y_score, dataset=dataset)
             y_pred_ar_pa = point_adjust(y_true, y_pred_ar)
             results["f1_pa_ar"]   = f1_score(y_true, y_pred_ar_pa, zero_division=0)
@@ -305,5 +305,3 @@ def print_metrics(metrics: Dict[str, float], prefix: str = "") -> None:
     print(f"{'─'*60}")
 
 
-# 兼容旧导入
-from typing import Tuple
