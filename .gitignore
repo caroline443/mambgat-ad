@@ -15,8 +15,11 @@ venv/
 env/
 .conda/
 
-# 模型 checkpoint 和结果（本地保留，不入库）
-# datasets/ 中的数据可以入库（总量 < 100MB，无需 LFS）
+# 数据集（本地自行管理，不入库）
+datasets/
+
+# 模型 checkpoint 和结果
+
 
 # 模型 checkpoint（本地保留，不入库）
 checkpoints/
