@@ -168,8 +168,8 @@ def train(cfg: dict):
             y_batch = y_batch.to(device, dtype=torch.float32)
 
             optimizer.zero_grad()
-            pred, _ = model(x_batch)
-            loss = criterion(pred, y_batch)
+            pred, recon, _ = model(x_batch)
+            loss = criterion(pred, y_batch, recon=recon, x=x_batch)
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
@@ -305,7 +305,7 @@ def _collect_errors(
     with torch.no_grad():
         for x_batch, _ in loader:
             x_batch = x_batch.to(device, dtype=torch.float32)
-            _, score = model(x_batch)       # (B, N)
+            _, __, score = model(x_batch)    # (B, N)
             all_scores.append(score.cpu().numpy())
     return np.concatenate(all_scores, axis=0)   # (T, N)
 

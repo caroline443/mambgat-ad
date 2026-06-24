@@ -75,7 +75,7 @@ def evaluate(args):
             for x, _ in tqdm(loader, desc=f"[Eval] {desc}",
                               ncols=80, unit="batch"):
                 x = x.to(device, dtype=torch.float32)
-                _, s = model(x)
+                _, __, s = model(x)
                 all_s.append(s.cpu().numpy())
         return np.concatenate(all_s, axis=0)
 

@@ -90,12 +90,22 @@ class MambGATAD(nn.Module):
             top_k=top_k,
         )
 
-        # ── 4. 预测头（编码器最后一步 → 预测未来 pred_len 步）──────
+        # ── 4. 预测头（最后一步 → 预测下一步）──────────────────────
         self.pred_head = nn.Sequential(
             nn.LayerNorm(d_model),
             nn.Linear(d_model, d_model // 2),
             nn.GELU(),
             nn.Linear(d_model // 2, pred_len),
+        )
+
+        # ── 5. 重建头（所有时间步 → 重建输入窗口）──────────────────
+        # 参考 ContrastAD 的多路残差，重建误差提供额外异常信号
+        # 计算量极小（一个线性层），训练仅慢 ~5%
+        self.recon_head = nn.Sequential(
+            nn.LayerNorm(d_model),
+            nn.Linear(d_model, d_model // 2),
+            nn.GELU(),
+            nn.Linear(d_model // 2, 1),   # 每通道每时刻重建为标量
         )
 
         self._init_weights()
@@ -134,12 +144,15 @@ class MambGATAD(nn.Module):
         last = h[:, -1, :, :]                  # (B, N, D)
         pred = self.pred_head(last)             # (B, N, pred_len)
 
-        # 4. 异常分数：预测值 vs 实际值（最后一步）的 MAE
-        #    （训练时不用 score，推理时使用）
-        actual_last = x[:, -1, :]              # (B, N)
-        score = (pred.squeeze(-1) - actual_last).abs()   # (B, N)
+        # 4. 重建：所有时间步还原输入（提升 AUC）
+        recon = self.recon_head(h).squeeze(-1)  # (B, T, N)
 
-        return pred, score
+        # 5. 联合异常分数：预测误差 + 重建误差（参考 ContrastAD 多路残差）
+        pred_err  = (pred.squeeze(-1) - x[:, -1, :]).abs()    # (B, N)
+        recon_err = (recon - x).abs().mean(dim=1)              # (B, N)
+        score = pred_err + recon_err                           # (B, N)
+
+        return pred, recon, score
 
     # ─────────────────────────────────────────────────────────────────
     def get_graph(self, head_idx: int = 0) -> torch.Tensor:
@@ -159,22 +172,33 @@ class MambGATAD(nn.Module):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class PredictionLoss(nn.Module):
-    """预测损失：MSE + 可选的 L1 正则（稀疏化图结构）"""
+    """
+    联合损失：预测损失 + 重建损失
+    pred_loss:  下一步预测误差（MSE + MAE 混合）
+    recon_loss: 输入窗口重建误差（MSE）
+    beta: 重建损失权重（参考 ContrastAD 用 0.1）
+    """
 
-    def __init__(self, alpha: float = 0.5):
-        """alpha: L1 和 MSE 的混合比例"""
+    def __init__(self, alpha: float = 0.5, beta: float = 0.1):
         super().__init__()
         self.alpha = alpha
-        self.mse = nn.MSELoss()
-        self.mae = nn.L1Loss()
+        self.beta  = beta
+        self.mse   = nn.MSELoss()
+        self.mae   = nn.L1Loss()
 
     def forward(
         self,
-        pred: torch.Tensor,   # (B, N, pred_len)
-        target: torch.Tensor,  # (B, N)
+        pred:   torch.Tensor,   # (B, N, pred_len)
+        target: torch.Tensor,   # (B, N)
+        recon:  torch.Tensor = None,  # (B, T, N)
+        x:      torch.Tensor = None,  # (B, T, N)
     ) -> torch.Tensor:
-        # target 扩展为 (B, N, pred_len)
+        # 预测损失
         target_exp = target.unsqueeze(-1).expand_as(pred)
-        loss_mse = self.mse(pred, target_exp)
-        loss_mae = self.mae(pred, target_exp)
-        return (1 - self.alpha) * loss_mse + self.alpha * loss_mae
+        pred_loss  = (1 - self.alpha) * self.mse(pred, target_exp) \
+                   + self.alpha       * self.mae(pred, target_exp)
+        # 重建损失（如果提供）
+        if recon is not None and x is not None:
+            recon_loss = self.mse(recon, x)
+            return pred_loss + self.beta * recon_loss
+        return pred_loss
