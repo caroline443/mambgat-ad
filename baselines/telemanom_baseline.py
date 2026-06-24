@@ -122,8 +122,7 @@ def run(cfg: dict):
         train, test, global_label = load_at_format(
             cfg["data"]["data_dir"], cfg["data"]["dataset"])
         n_ch = train.shape[1]
-        # AT 格式无逐通道标签，用全局标签扩展
-        per_ch_labels = np.tile(global_label[:, None], (1, n_ch))
+        per_ch_labels = None   # AT 格式只有全局标签
     else:
         train, test, per_ch_labels, channels = load_telemanom_format(
             cfg["data"]["data_dir"], cfg["data"]["label_file"],
@@ -159,6 +158,15 @@ def run(cfg: dict):
         m = evaluate_per_channel(
             per_ch_labels[:test_len], all_test_err, all_train_err, pct)
         print_metrics(m, f"Telemanom Baseline | {dname} [逐通道宏平均]")
+
+    # 保存结果
+    import json, os
+    os.makedirs("checkpoints", exist_ok=True)
+    out = f"checkpoints/baseline_telemanom_{cfg['data']['dataset']}.json"
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump({k: round(float(v), 6) for k, v in m.items()
+                   if isinstance(v, (int, float))}, f, indent=2)
+    print(f"  结果已保存 → {out}")
 
     return m
 

@@ -88,26 +88,25 @@ def vus_pr(y_true: np.ndarray, y_score: np.ndarray,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 最优阈值搜索（训练集决定阈值）
+# 最优阈值搜索
 # ─────────────────────────────────────────────────────────────────────────────
 
 def best_f1_threshold(
-    train_score: np.ndarray,
-    test_score: np.ndarray,
-    test_label: np.ndarray,
+    y_true: np.ndarray,
+    y_score: np.ndarray,
     n_candidates: int = 200,
 ) -> Tuple[float, float]:
     """
-    在训练集分数分布上搜索阈值，使测试集 F1(PA) 最大。
+    在测试集分数上搜索使 F1-PA 最大的阈值（论文常用的"上帝视角"协议）。
     返回 (best_threshold, best_f1_pa)
+    注意：这是论文对齐用的参考值，不是真实部署值。
     """
-    # 候选阈值从训练集分数的百分位取
-    candidates = np.percentile(train_score, np.linspace(50, 100, n_candidates))
+    candidates = np.unique(np.percentile(y_score, np.linspace(0, 100, n_candidates)))
     best_thr, best_f1 = candidates[-1], 0.0
     for thr in candidates:
-        pred = (test_score > thr).astype(int)
-        pred_pa = point_adjust(test_label, pred)
-        f1 = f1_score(test_label, pred_pa, zero_division=0)
+        pred = (y_score > thr).astype(int)
+        pred_pa = point_adjust(y_true, pred)
+        f1 = f1_score(y_true, pred_pa, zero_division=0)
         if f1 > best_f1:
             best_f1, best_thr = f1, thr
     return best_thr, best_f1
@@ -228,6 +227,10 @@ def evaluate_anomaly(
             pass
         results["vus_roc"] = vus_roc(y_true, y_score, vus_max_buffer)
         results["vus_pr"]  = vus_pr(y_true, y_score, vus_max_buffer)
+        # best-F1 搜索（论文对齐用，上帝视角阈值）
+        if use_pa:
+            _, best_f1 = best_f1_threshold(y_true, y_score)
+            results["f1_pa_best"] = best_f1
     return results
 
 
@@ -240,16 +243,17 @@ def print_metrics(metrics: Dict[str, float], prefix: str = "") -> None:
     print(f"  {'指标':<22} {'值':>10}")
     print(f"{'─'*60}")
     order = [
-        ("vus_roc",  "VUS-ROC  ★ SOTA对标"),
-        ("vus_pr",   "VUS-PR"),
-        ("f1_pa",    "F1  (Point-Adjust)"),
-        ("prec_pa",  "Precision (PA)"),
-        ("rec_pa",   "Recall    (PA)"),
-        ("f1_raw",   "F1  (Raw, 严格)"),
-        ("prec_raw", "Precision (Raw)"),
-        ("rec_raw",  "Recall    (Raw)"),
-        ("auc_roc",  "AUC-ROC"),
-        ("auc_pr",   "AUC-PR"),
+        ("vus_roc",    "VUS-ROC  ★ 与论文直接可比"),
+        ("vus_pr",     "VUS-PR"),
+        ("f1_pa_best", "F1-PA (best-F1, 论文对齐)"),
+        ("f1_pa",      "F1-PA (train-pct, 真实)"),
+        ("prec_pa",    "Precision (PA)"),
+        ("rec_pa",     "Recall    (PA)"),
+        ("f1_raw",     "F1  (Raw, 严格)"),
+        ("prec_raw",   "Precision (Raw)"),
+        ("rec_raw",    "Recall    (Raw)"),
+        ("auc_roc",    "AUC-ROC"),
+        ("auc_pr",     "AUC-PR"),
     ]
     for key, label in order:
         if key in metrics:
