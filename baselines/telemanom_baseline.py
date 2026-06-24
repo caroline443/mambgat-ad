@@ -152,7 +152,8 @@ def run(cfg: dict):
         thr  = float(np.percentile(all_train_err.mean(1), pct))
         pred = (global_score > thr).astype(int)
         m = evaluate_anomaly(global_label[:test_len].astype(int),
-                             pred, global_score, use_pa=True)
+                             pred, global_score, use_pa=True,
+                             dataset=cfg['data']['dataset'])
         print_metrics(m, f"Telemanom Baseline | {dname} [全局]")
     else:
         m = evaluate_per_channel(

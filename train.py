@@ -243,6 +243,7 @@ def train(cfg: dict):
         metrics = evaluate_anomaly(
             y_true=global_label, y_pred=global_pred,
             y_score=global_score, use_pa=True,
+            dataset=cfg['data']['dataset'],
         )
         print_metrics(metrics,
                       prefix=f"MambGAT-AD on {dataset_name} [全局评估，AT格式]")

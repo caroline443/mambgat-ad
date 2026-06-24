@@ -88,6 +88,41 @@ def vus_pr(y_true: np.ndarray, y_score: np.ndarray,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 异常率阈值（Anomaly Transformer / ContrastAD 协议，可与论文直接比 F1）
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 各数据集的标注异常率（来自 AT 格式数据集统计，ContrastAD Table 1）
+ANOMALY_RATIO = {
+    "smap": 0.1313,
+    "msl":  0.1072,
+    "smd":  0.0416,
+    "psm":  0.2776,
+    "swat": 0.1214,
+}
+
+def anomaly_ratio_threshold(
+    y_true: np.ndarray,
+    y_score: np.ndarray,
+    dataset: str = None,
+    ratio: float = None,
+) -> np.ndarray:
+    """
+    按已知异常率设阈值（Anomaly Transformer / ContrastAD 标准协议）。
+    取 score 最高的 ratio% 为异常，其余为正常。
+
+    与 ContrastAD Table 2 的 F1 数字直接可比。
+
+    Args:
+        dataset: 数据集名称（自动查异常率），或手动传 ratio
+        ratio:   异常比例，如 0.1313 表示 13.13%
+    """
+    if ratio is None:
+        ratio = ANOMALY_RATIO.get(dataset.lower(), y_true.mean())
+    thr   = np.percentile(y_score, 100 * (1 - ratio))
+    return (y_score > thr).astype(int)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 最优阈值搜索
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -209,6 +244,7 @@ def evaluate_anomaly(
     y_score: np.ndarray = None,
     use_pa: bool = True,
     vus_max_buffer: int = 100,
+    dataset: str = None,      # 传入数据集名可自动计算 anomaly-ratio F1
 ) -> Dict[str, float]:
     results = {}
     results["f1_raw"]   = f1_score(y_true, y_pred, zero_division=0)
@@ -227,10 +263,17 @@ def evaluate_anomaly(
             pass
         results["vus_roc"] = vus_roc(y_true, y_score, vus_max_buffer)
         results["vus_pr"]  = vus_pr(y_true, y_score, vus_max_buffer)
-        # best-F1 搜索（论文对齐用，上帝视角阈值）
+        # best-F1 搜索（部分论文使用）
         if use_pa:
             _, best_f1 = best_f1_threshold(y_true, y_score)
             results["f1_pa_best"] = best_f1
+        # anomaly-ratio 阈值（Anomaly Transformer / ContrastAD 协议，可直接对标论文）
+        if dataset is not None or y_score is not None:
+            y_pred_ar = anomaly_ratio_threshold(y_true, y_score, dataset=dataset)
+            y_pred_ar_pa = point_adjust(y_true, y_pred_ar)
+            results["f1_pa_ar"]   = f1_score(y_true, y_pred_ar_pa, zero_division=0)
+            results["prec_pa_ar"] = precision_score(y_true, y_pred_ar_pa, zero_division=0)
+            results["rec_pa_ar"]  = recall_score(y_true, y_pred_ar_pa, zero_division=0)
     return results
 
 
@@ -243,16 +286,17 @@ def print_metrics(metrics: Dict[str, float], prefix: str = "") -> None:
     print(f"  {'指标':<22} {'值':>10}")
     print(f"{'─'*60}")
     order = [
-        ("vus_roc",    "VUS-ROC  ★ 与论文直接可比"),
+        ("auc_roc",    "AUC-ROC ★ 与ContrastAD直接比"),
+        ("vus_roc",    "VUS-ROC ★ 与Multi-View直接比"),
+        ("f1_pa_ar",   "F1-PA (anomaly-ratio) ★直接比"),
+        ("prec_pa_ar", "Precision (anomaly-ratio)"),
+        ("rec_pa_ar",  "Recall    (anomaly-ratio)"),
         ("vus_pr",     "VUS-PR"),
-        ("f1_pa_best", "F1-PA (best-F1, 论文对齐)"),
-        ("f1_pa",      "F1-PA (train-pct, 真实)"),
+        ("f1_pa_best", "F1-PA (best-F1, 参考)"),
+        ("f1_pa",      "F1-PA (train-pct, 部署)"),
         ("prec_pa",    "Precision (PA)"),
         ("rec_pa",     "Recall    (PA)"),
-        ("f1_raw",     "F1  (Raw, 严格)"),
-        ("prec_raw",   "Precision (Raw)"),
-        ("rec_raw",    "Recall    (Raw)"),
-        ("auc_roc",    "AUC-ROC"),
+        ("f1_raw",     "F1  (Raw)"),
         ("auc_pr",     "AUC-PR"),
     ]
     for key, label in order:

@@ -8,7 +8,7 @@ data:
   data_dir: ./datasets/AT/SMD
   label_file: null
   window_size: 100
-  window_step: 1
+  window_step: 10                      # SMD数据量大，step=10 减少到~56k样本
   test_step: 1
   normalize: true
 
