@@ -35,5 +35,6 @@ train:
   num_workers: 0                 # WSL 必须 0
 
 threshold:
-  method: percentile
-  percentile: 99.5
+  method: valset
+  smooth_window: 10
+  n_candidates: 300
