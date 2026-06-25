@@ -1,42 +1,40 @@
-# MambGAT-AD v0 配置 — MSL
-
 data:
-  dataset:     msl
-  format:      AT
-  data_dir:    ./datasets/AT/MSL
-  label_file:  null
+  dataset: msl
+  format: AT
+  data_dir: ./datasets/AT/MSL
+  label_file: null
   window_size: 100
   window_step: 1
-  test_step:   1
-  normalize:   true
-
+  test_step: 1
+  normalize: true
 model:
-  d_model:  64
-  n_blocks:  2
-  d_state:  16
-  d_conv:    4
-  expand:    2
-  pred_len:  1
-  dropout:  0.1
-  n_heads:   4
-  top_k:    null
-  patch_sizes: [4, 8, 16]
+  d_model: 64
+  n_blocks: 2
+  d_state: 16
+  d_conv: 4
+  expand: 2
+  pred_len: 1
+  dropout: 0.1
+  n_heads: 4
+  top_k: null
+  patch_sizes:
+  - 4
+  - 8
+  - 16
   n_snapshots: 4
-
 train:
-  epochs:       50
-  batch_size:   128
-  lr:           1.0e-3
-  weight_decay: 1.0e-4
-  patience:     7
-  device:       cuda
-  seed:         42
-  save_dir:     ./checkpoints
-  num_workers:  4
-  val_ratio:    0.2
-
+  epochs: 50
+  batch_size: 128
+  lr: 0.001
+  weight_decay: 0.0001
+  patience: 7
+  device: cuda
+  seed: 42
+  save_dir: ./checkpoints
+  num_workers: 4
+  val_ratio: 0.2
 loss:
-  beta:     0.5
-  lambda1:  0.1
-  lambda2:  0.05
+  beta: 0.5
+  lambda1: 0.1
+  lambda2: 0.05
   lambda_c: 0.0

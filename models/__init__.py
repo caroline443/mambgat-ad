@@ -9,8 +9,8 @@ MambGAT-AD 模型包
   v4  + 图对比正则化（DGCL）
 """
 
-from .model_v2 import MambGATAD, AnomalyLoss
+from .model_v3 import MambGATAD, AnomalyLoss
 
-VERSION = "v2"   # train.py 用此字段自动命名 checkpoint
+VERSION = "v3"   # train.py 用此字段自动命名 checkpoint
 
 __all__ = ["MambGATAD", "AnomalyLoss", "VERSION"]

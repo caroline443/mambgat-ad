@@ -228,8 +228,11 @@ def train(cfg: dict):
         pred_len    = model_cfg.get("pred_len",  1),
         dropout     = model_cfg.get("dropout", 0.1),
         # v1+ 参数（v0 忽略）
-        n_heads     = model_cfg.get("n_heads",   4),
-        top_k       = model_cfg.get("top_k",  None),
+        n_heads      = model_cfg.get("n_heads",       4),
+        top_k        = model_cfg.get("top_k",      None),
+        # v3+ 参数（v0/v1/v2 忽略）
+        patch_sizes  = tuple(model_cfg.get("patch_sizes", [1])),
+        n_snapshots  = model_cfg.get("n_snapshots",   4),
     ).to(device)
 
     print(f"[Model] {model.__class__.__name__} | 参数量: {model.count_parameters():,}")
