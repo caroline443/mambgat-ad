@@ -408,6 +408,19 @@ class MambGATAD(nn.Module):
         return pred, recon, score, contrast_loss
 
     # ─────────────────────────────────────────────────────────────────
+    def encode(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        只跑 encoder，返回最后时间步的节点特征，用于表示空间异常评分。
+
+        Args:
+            x: (B, T, N)
+        Returns:
+            (B, N, D) — 每个通道在最后时间步的编码表示
+        """
+        h = self.patch_embed(x)    # (B, T, N, D)
+        h = self.encoder(h)         # (B, T, N, D)
+        return h[:, -1, :, :]      # (B, N, D)
+
     def get_graph(self, head_idx: int = 0) -> torch.Tensor:
         """获取学习到的传感器耦合图（用于论文可视化）。返回 (N, N) 邻接矩阵"""
         return self.encoder.blocks[0].spatial.get_adjacency(head_idx=head_idx)

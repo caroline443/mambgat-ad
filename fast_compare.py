@@ -54,6 +54,7 @@ def topk_mean_agg(z: np.ndarray, k: int = 3) -> np.ndarray:
 
 
 def collect_scores(model, loader, device, desc="推理"):
+    """收集重建/预测误差分数，返回 (T, N)"""
     model.eval()
     scores = []
     with torch.no_grad():
@@ -65,6 +66,47 @@ def collect_scores(model, loader, device, desc="推理"):
             recon_err = (recon - xb).abs().mean(dim=1)
             scores.append((pred_err + recon_err).cpu().numpy())
     return np.concatenate(scores, axis=0)   # (T, N)
+
+
+def collect_repr(model, loader, device, desc="特征提取"):
+    """收集 encoder 表示，返回 (T, N, D)"""
+    model.eval()
+    reprs = []
+    with torch.no_grad():
+        for xb, _ in tqdm(loader, desc=f"    {desc}", ncols=80, leave=False):
+            xb = xb.to(device, dtype=torch.float32)
+            z = model.encode(xb)   # (B, N, D)
+            reprs.append(z.cpu().numpy())
+    return np.concatenate(reprs, axis=0)   # (T, N, D)
+
+
+def repr_auc(train_repr, test_repr, test_labels, label_offset):
+    """
+    用表示空间标准化 Mahalanobis 距离计算 AUC。
+    逐通道：(z - μ) / σ，取 L2 norm 作为该通道异常分。
+    train_repr: (T_tr, N, D)
+    test_repr:  (T_te, N, D)
+    """
+    N = train_repr.shape[1]
+    T_te = test_repr.shape[0]
+    scores = np.zeros((T_te, N))
+
+    for n in range(N):
+        mu  = train_repr[:, n, :].mean(axis=0)         # (D,)
+        std = train_repr[:, n, :].std(axis=0) + 1e-6   # (D,)
+        z   = (test_repr[:, n, :] - mu) / std          # (T_te, D)
+        scores[:, n] = np.linalg.norm(z, axis=1)       # (T_te,)
+
+    # top-3 mean 聚合
+    global_score = topk_mean_agg(scores, k=min(3, N))
+
+    n = min(len(global_score), len(test_labels) - label_offset)
+    labels_cut = test_labels[label_offset : label_offset + n].astype(int)
+    score_cut  = global_score[:n]
+    try:
+        return roc_auc_score(labels_cut, score_cut)
+    except Exception:
+        return 0.5
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -140,7 +182,7 @@ def run_experiment(
 
     # 预先计算训练集 IQR 统计量（用于 AUC 评估）
     # 先用随机初始化的模型跑一遍，后续每 epoch 更新
-    history = {"epoch": [], "auc": [], "train_loss": []}
+    history = {"epoch": [], "auc_recon": [], "auc_repr": [], "train_loss": []}
 
     epoch_bar = tqdm(range(1, n_epochs + 1),
                      desc=f"{tag} 总进度", ncols=80, position=0)
@@ -168,39 +210,41 @@ def run_experiment(
         scheduler.step()
         avg_loss = float(np.mean(losses))
 
-        # ── 评估 AUC ──────────────────────────────────────────────
+        # ── 评估：重建误差 AUC ────────────────────────────────────
+        label_offset = WINDOW - 1
         model.eval()
-        tr_scores = collect_scores(model, train_loader, device, desc=f"{tag} 训练集推理")
-        te_scores = collect_scores(model, test_loader,  device, desc=f"{tag} 测试集推理")
+        tr_scores = collect_scores(model, train_loader, device, desc=f"{tag} 重建推理(train)")
+        te_scores = collect_scores(model, test_loader,  device, desc=f"{tag} 重建推理(test)")
 
-        # IQR 归一化（GDN 风格）
         tr_med = np.median(tr_scores, axis=0, keepdims=True)
         tr_iqr = (np.percentile(tr_scores, 75, axis=0, keepdims=True)
                   - np.percentile(tr_scores, 25, axis=0, keepdims=True) + 0.01)
-        z_te = np.abs(te_scores - tr_med) / tr_iqr
-
-        # top-3 mean 聚合
+        z_te         = np.abs(te_scores - tr_med) / tr_iqr
         global_score = topk_mean_agg(z_te, k=3)
-
-        # 标签对齐（窗口末尾对应 label[i + W - 1]）
-        label_offset = WINDOW - 1
-        n = min(len(global_score), len(test_labels) - label_offset)
-        labels_cut = test_labels[label_offset : label_offset + n].astype(int)
-        score_cut  = global_score[:n]
-
+        n            = min(len(global_score), len(test_labels) - label_offset)
         try:
-            auc = roc_auc_score(labels_cut, score_cut)
+            auc_recon = roc_auc_score(
+                test_labels[label_offset:label_offset+n].astype(int),
+                global_score[:n])
         except Exception:
-            auc = 0.5
+            auc_recon = 0.5
+
+        # ── 评估：表示空间 Mahalanobis AUC ───────────────────────
+        tr_repr = collect_repr(model, train_loader, device, desc=f"{tag} 表示提取(train)")
+        te_repr = collect_repr(model, test_loader,  device, desc=f"{tag} 表示提取(test)")
+        auc_repr = repr_auc(tr_repr, te_repr, test_labels, label_offset)
 
         elapsed = time.time() - t0
         history["epoch"].append(epoch)
-        history["auc"].append(auc)
+        history["auc_recon"].append(auc_recon)
+        history["auc_repr"].append(auc_repr)
         history["train_loss"].append(avg_loss)
 
-        epoch_bar.set_postfix(loss=f"{avg_loss:.4f}", auc=f"{auc:.4f}")
-        tqdm.write(f"{tag} Epoch {epoch:02d}/{n_epochs}  "
-                   f"loss={avg_loss:.5f}  AUC={auc:.4f}  ({elapsed:.1f}s)")
+        epoch_bar.set_postfix(loss=f"{avg_loss:.4f}",
+                               recon=f"{auc_recon:.4f}",
+                               repr=f"{auc_repr:.4f}")
+        tqdm.write(f"{tag} Epoch {epoch:02d}/{n_epochs}  loss={avg_loss:.5f}  "
+                   f"AUC(recon)={auc_recon:.4f}  AUC(repr)={auc_repr:.4f}  ({elapsed:.1f}s)")
 
     epoch_bar.close()
     return history
@@ -266,36 +310,34 @@ def main():
     )
 
     # ── 汇总 ──────────────────────────────────────────────────────
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 70)
     print("  结果汇总（真实 SMAP 数据）")
-    print("=" * 60)
-    print(f"  {'Epoch':>5}  {'v1 AUC':>8}  {'v2 AUC':>8}  {'Δ AUC':>8}")
-    print(f"  {'─'*40}")
+    print("  recon=重建误差分数  repr=表示空间Mahalanobis距离")
+    print("=" * 70)
+    print(f"  {'Ep':>3}  {'v1(recon)':>10}  {'v1(repr)':>10}  "
+          f"{'v2(recon)':>10}  {'v2(repr)':>10}")
+    print(f"  {'─'*58}")
     for i in range(args.epochs):
-        a1 = hist_v1["auc"][i]
-        a2 = hist_v2["auc"][i]
-        delta = a2 - a1
-        marker = " ✓" if delta > 0 else " ✗"
-        print(f"  {i+1:>5}  {a1:>8.4f}  {a2:>8.4f}  {delta:>+8.4f}{marker}")
+        r1  = hist_v1["auc_recon"][i]
+        p1  = hist_v1["auc_repr"][i]
+        r2  = hist_v2["auc_recon"][i]
+        p2  = hist_v2["auc_repr"][i]
+        print(f"  {i+1:>3}  {r1:>10.4f}  {p1:>10.4f}  {r2:>10.4f}  {p2:>10.4f}")
 
-    best_v1 = max(hist_v1["auc"])
-    best_v2 = max(hist_v2["auc"])
-    last_v1 = hist_v1["auc"][-1]
-    last_v2 = hist_v2["auc"][-1]
+    print(f"\n  最佳 AUC(repr)  →  v1: {max(hist_v1['auc_repr']):.4f}"
+          f"   v2: {max(hist_v2['auc_repr']):.4f}")
+    print(f"  最佳 AUC(recon) →  v1: {max(hist_v1['auc_recon']):.4f}"
+          f"   v2: {max(hist_v2['auc_recon']):.4f}")
 
-    print(f"\n  最佳 AUC  →  v1: {best_v1:.4f}   v2: {best_v2:.4f}   Δ={best_v2-best_v1:+.4f}")
-    print(f"  末轮 AUC  →  v1: {last_v1:.4f}   v2: {last_v2:.4f}   Δ={last_v2-last_v1:+.4f}")
-
-    if best_v2 > best_v1 + 0.01:
-        print(f"\n  ✅ v2 改进有效！AUC 提升 {best_v2-best_v1:+.4f}")
-        print("     建议：去服务器用 config/smap.yaml 全量训练（50 epoch）。")
-    elif best_v2 >= best_v1 - 0.01:
-        print(f"\n  ⚠️  v2 与 v1 接近（差距 < 0.01），5 epoch 可能还未收敛。")
-        print("     建议：加到 --epochs 15 再跑一次，或直接全量训练。")
+    best_repr = max(max(hist_v1["auc_repr"]), max(hist_v2["auc_repr"]))
+    best_recon = max(max(hist_v1["auc_recon"]), max(hist_v2["auc_recon"]))
+    if best_repr > best_recon + 0.05:
+        print(f"\n  ✅ 表示空间评分(repr) 显著优于重建误差(recon)！")
+        print(f"     repr AUC={best_repr:.4f}  recon AUC={best_recon:.4f}")
+        print(f"     结论：换用表示空间异常评分可大幅提升 SMAP 结果。")
     else:
-        print(f"\n  ❌ v2 在 5 epoch 内未超过 v1，建议检查损失权重或增大 epoch。")
-
-    print("=" * 60)
+        print(f"\n  ⚠️  repr 与 recon 差距不大，需更多 epoch 或检查 encoder 质量。")
+    print("=" * 70)
 
 
 if __name__ == "__main__":
