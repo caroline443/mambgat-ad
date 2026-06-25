@@ -252,8 +252,14 @@ def train(cfg: dict):
     # ── Checkpoint ────────────────────────────────────────────────
     save_dir  = Path(cfg["train"]["save_dir"])
     save_dir.mkdir(parents=True, exist_ok=True)
-    best_path = save_dir / f"best_{dataset_name}.pt"
-    last_path = save_dir / f"last_{dataset_name}.pt"
+    # 版本号优先级：CLI --version > config version > 自动从模型模块名推断
+    if "version" not in cfg:
+        mod = MambGATAD.__module__          # e.g. "models.model_v1"
+        cfg["version"] = mod.split("_")[-1] if "_v" in mod else "v0"
+    version = cfg["version"]
+    print(f"[Info] 实验版本: {version}")
+    best_path = save_dir / f"best_{dataset_name}_{version}.pt"
+    last_path = save_dir / f"last_{dataset_name}_{version}.pt"
 
     best_val_loss = float("inf")
     patience_cnt  = 0
@@ -362,7 +368,7 @@ def train(cfg: dict):
     )
 
     # 保存结果
-    result_path = save_dir / f"results_{dataset_name}.json"
+    result_path = save_dir / f"results_{dataset_name}_{version}.json"
     with open(result_path, "w", encoding="utf-8") as f:
         json.dump({k: round(float(v), 6) for k, v in metrics.items()}, f, indent=2)
     print(f"  结果已保存 → {result_path}")
@@ -380,6 +386,8 @@ def parse_args():
     p.add_argument("--dataset", default=None)
     p.add_argument("--epochs",  default=None, type=int)
     p.add_argument("--device",  default=None)
+    p.add_argument("--version", default=None,
+                   help="实验版本号，用于区分 checkpoint 和结果文件（如 v0/v1/v2）")
     return p.parse_args()
 
 
@@ -389,4 +397,5 @@ if __name__ == "__main__":
     if args.dataset: cfg["data"]["dataset"]   = args.dataset
     if args.epochs:  cfg["train"]["epochs"]   = args.epochs
     if args.device:  cfg["train"]["device"]   = args.device
+    if args.version: cfg["version"]           = args.version
     train(cfg)
