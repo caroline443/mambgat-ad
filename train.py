@@ -112,7 +112,7 @@ def evaluate(
     tr_med = np.median(train_scores, axis=0, keepdims=True)
     tr_iqr = (np.percentile(train_scores, 75, axis=0, keepdims=True)
               - np.percentile(train_scores, 25, axis=0, keepdims=True) + 1e-4)
-    z_test = np.abs(test_scores - tr_med) / tr_iqr              # (T_te, N)
+    z_test = (test_scores - tr_med) / tr_iqr                    # (T_te, N)  注：不用 abs，异常=误差高于训练中位数
 
     # ── top-3 均值聚合 → 全局分数 ────────────────────────────────
     k = min(3, z_test.shape[1])

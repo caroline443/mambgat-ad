@@ -226,5 +226,6 @@ class MambGATAD(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 
-# AnomalyLoss 与 v1 相同（不加频域损失）
-from .model_v0 import AnomalyLoss  # noqa: F401, E402
+# AnomalyLoss 复用 v2（含频域损失 L_freq + L_shape）
+# v3 = 多尺度 Patch 嵌入 + v2 损失，lambda1/lambda2 在 config 里配置
+from .model_v2 import AnomalyLoss  # noqa: F401, E402
