@@ -26,9 +26,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 import yaml
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from data import build_loaders
+from data.dataset import TimeSeriesDataset
 from models import MambGATAD, PredictionLoss
 from utils import evaluate_anomaly, print_metrics
 from utils.metrics import evaluate_per_channel
@@ -67,6 +69,23 @@ def merge_args(cfg: dict, args: argparse.Namespace) -> dict:
     return cfg
 
 
+def topk_mean_agg(z: np.ndarray, k: int = 3) -> np.ndarray:
+    """
+    取每个时间步 top-k 通道分数的均值。
+    比 max 稳定（不被单通道噪声主导），比 mean 更聚焦于异常通道。
+    k 默认 3；通道数不足时自动退化为 max。
+
+    Args:
+        z: (T, N) IQR 归一化后的逐通道分数
+        k: 保留的最高分通道数
+    Returns:
+        (T,) 全局异常分数
+    """
+    k = min(k, z.shape[1])
+    topk = np.partition(z, -k, axis=1)[:, -k:]   # 取最大 k 列（无需排序）
+    return topk.mean(axis=1)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 训练主函数
 # ─────────────────────────────────────────────────────────────────────────────
@@ -83,20 +102,42 @@ def train(cfg: dict):
     print(f"[Info] 使用设备: {device}")
 
     # ── 数据 ──────────────────────────────────────────────────────
-    data_fmt = cfg["data"].get("format", "AT").upper()
+    data_fmt   = cfg["data"].get("format", "AT").upper()
+    train_step = cfg["data"].get("window_step", 1)
+    window_size = cfg["data"]["window_size"]
+
     train_loader, test_loader, test_labels, n_channels = build_loaders(
         data_dir       = cfg["data"]["data_dir"],
         dataset        = cfg["data"]["dataset"],
         fmt            = data_fmt,
         label_file     = cfg["data"].get("label_file"),
-        window_size    = cfg["data"]["window_size"],
-        train_step     = cfg["data"].get("window_step", 1),
+        window_size    = window_size,
+        train_step     = train_step,
         test_step      = cfg["data"].get("test_step", 1),
         batch_size     = cfg["train"]["batch_size"],
         normalize_data = cfg["data"].get("normalize", True),
         num_workers    = cfg["train"].get("num_workers", 0),
     )
-    window_size = cfg["data"]["window_size"]
+
+    # ── Bug 6 修复：从训练集末尾切 20% 作验证集，用验证 loss 做早停 ──
+    # 在时间维度上切分，避免未来信息泄露给训练集
+    val_ratio   = cfg["train"].get("val_ratio", 0.2)
+    train_np    = train_loader.dataset.data.numpy()          # (T_train, N)
+    val_cut     = int(len(train_np) * (1.0 - val_ratio))
+
+    train_ds = TimeSeriesDataset(train_np[:val_cut], window_size, train_step)
+    val_ds   = TimeSeriesDataset(train_np[val_cut:], window_size, step=1)
+
+    train_loader = DataLoader(
+        train_ds, batch_size=cfg["train"]["batch_size"],
+        shuffle=True, num_workers=cfg["train"].get("num_workers", 0),
+        drop_last=False,
+    )
+    val_loader = DataLoader(
+        val_ds, batch_size=cfg["train"]["batch_size"],
+        shuffle=False, num_workers=0,
+    )
+    print(f"[Data] 训练窗口={len(train_ds):,}  验证窗口={len(val_ds):,}")
 
     # ── 模型 ──────────────────────────────────────────────────────
     model = MambGATAD(
@@ -126,10 +167,10 @@ def train(cfg: dict):
     criterion = PredictionLoss(alpha=0.5)
 
     # ── Checkpoint 目录 ───────────────────────────────────────────
-    save_dir = Path(cfg["train"]["save_dir"])
+    save_dir  = Path(cfg["train"]["save_dir"])
     save_dir.mkdir(parents=True, exist_ok=True)
     best_path = save_dir / f"best_{cfg['data']['dataset']}.pt"
-    last_path = save_dir / f"last_{cfg['data']['dataset']}.pt"   # 每轮覆盖，用于断点续跑
+    last_path = save_dir / f"last_{cfg['data']['dataset']}.pt"
 
     # ── 断点恢复 ──────────────────────────────────────────────────
     start_epoch   = 1
@@ -144,7 +185,7 @@ def train(cfg: dict):
         start_epoch   = ckpt["epoch"] + 1
         best_val_loss = ckpt.get("best_val_loss", float("inf"))
         patience_cnt  = ckpt.get("patience_cnt", 0)
-        print(f"  [Resume] 从 Epoch {start_epoch} 继续，已有 best_loss={best_val_loss:.5f}")
+        print(f"  [Resume] 从 Epoch {start_epoch} 继续，已有 best_val_loss={best_val_loss:.5f}")
 
     patience = cfg["train"]["patience"]
 
@@ -176,16 +217,28 @@ def train(cfg: dict):
             train_losses.append(loss.item())
 
         scheduler.step()
-        avg_loss = np.mean(train_losses)
-        elapsed  = time.time() - t0
+        avg_train_loss = np.mean(train_losses)
+        elapsed = time.time() - t0
 
-        # ── Validation（用训练误差收敛情况判断）────────────────
-        print(f"  Epoch {epoch:02d}  loss={avg_loss:.5f}  "
+        # ── Bug 6 修复：用验证集 loss 判断早停 ──────────────────
+        model.eval()
+        val_losses = []
+        with torch.no_grad():
+            for x_v, y_v in val_loader:
+                x_v = x_v.to(device, dtype=torch.float32)
+                y_v = y_v.to(device, dtype=torch.float32)
+                pred_v, recon_v, _ = model(x_v)
+                val_losses.append(
+                    criterion(pred_v, y_v, recon=recon_v, x=x_v).item()
+                )
+        avg_val_loss = float(np.mean(val_losses))
+
+        print(f"  Epoch {epoch:02d}  train={avg_train_loss:.5f}  "
+              f"val={avg_val_loss:.5f}  "
               f"lr={scheduler.get_last_lr()[0]:.2e}  "
               f"time={elapsed:.1f}s")
 
-        # 早停（基于 train loss）
-        is_nan = np.isnan(avg_loss)
+        is_nan = np.isnan(avg_train_loss) or np.isnan(avg_val_loss)
         ckpt_data = {
             "epoch":         epoch,
             "model_state":   model.state_dict(),
@@ -199,12 +252,11 @@ def train(cfg: dict):
         if is_nan:
             print(f"  [WARN] loss=nan，跳过本轮保存")
         else:
-            # 每轮保存 last checkpoint（断点续跑用）
             torch.save(ckpt_data, last_path)
 
-            if avg_loss < best_val_loss:
-                best_val_loss          = avg_loss
-                patience_cnt           = 0
+            if avg_val_loss < best_val_loss:        # ← 基于验证 loss
+                best_val_loss              = avg_val_loss
+                patience_cnt               = 0
                 ckpt_data["best_val_loss"] = best_val_loss
                 ckpt_data["patience_cnt"]  = patience_cnt
                 torch.save(ckpt_data, best_path)
@@ -212,7 +264,7 @@ def train(cfg: dict):
             else:
                 patience_cnt += 1
                 if patience_cnt >= patience:
-                    print(f"\n  早停触发（{patience} 轮无改善）")
+                    print(f"\n  早停触发（{patience} 轮验证 loss 无改善）")
                     break
 
     # ── 评估 ──────────────────────────────────────────────────────
@@ -221,25 +273,45 @@ def train(cfg: dict):
     ckpt = torch.load(best_path, map_location=device, weights_only=False)
     model.load_state_dict(ckpt["model_state"])
 
-    # 收集训练集误差（用于拟合阈值）
-    train_errors = _collect_errors(model, train_loader, device)
-    # 收集测试集误差
-    test_errors  = _collect_errors(model, test_loader,  device)
+    # 用完整训练集收集误差（不再切 val）
+    full_train_loader, _, _, _ = build_loaders(
+        data_dir       = cfg["data"]["data_dir"],
+        dataset        = cfg["data"]["dataset"],
+        fmt            = data_fmt,
+        label_file     = cfg["data"].get("label_file"),
+        window_size    = window_size,
+        train_step     = train_step,
+        test_step      = cfg["data"].get("test_step", 1),
+        batch_size     = cfg["train"]["batch_size"],
+        normalize_data = cfg["data"].get("normalize", True),
+        num_workers    = 0,
+    )
+
+    train_errors = _collect_errors(model, full_train_loader, device)
+    test_errors  = _collect_errors(model, test_loader, device)
 
     # ── 评估 ─────────────────────────────────────────────────────
     import json
-    thr_cfg    = cfg.get("threshold", {})
-    percentile = thr_cfg.get("percentile", 99.5)
-    test_len   = len(test_errors)
+    thr_cfg      = cfg.get("threshold", {})
+    percentile   = thr_cfg.get("percentile", 99.5)
+    top_k        = thr_cfg.get("top_k", 3)
+    test_len     = len(test_errors)
     dataset_name = cfg['data']['dataset'].upper()
 
     if data_fmt == "AT":
-        # ── AT 格式：全局评估（与主流论文直接可比）─────────────
-        global_label = test_labels[:test_len].astype(int)
+        # ── Bug 1 修复：标签对齐 ──────────────────────────────────
+        # score[i] 来自窗口 data[i : i+W]，对应窗口末尾时间步 i+W-1
+        # 正确对齐：label[i + W - 1]，而非 label[i]
+        label_offset = window_size - 1
+        label_end    = min(label_offset + test_len, len(test_labels))
+        global_label = test_labels[label_offset:label_end].astype(int)
+        # 若末尾标签不足则同步截断（极少见）
+        if len(global_label) < test_len:
+            test_len    = len(global_label)
+            test_errors = test_errors[:test_len]
+            train_errors = train_errors   # 训练集不受影响
 
         # GDN 风格 IQR 归一化（Deng & Hooi, AAAI 2021）
-        # score_i = |err_i - median_train_i| / IQR_train_i
-        # 使各通道量级统一，消除高误差通道对聚合的主导
         tr_median = np.median(train_errors, axis=0, keepdims=True)
         tr_iqr    = (np.percentile(train_errors, 75, axis=0, keepdims=True)
                      - np.percentile(train_errors, 25, axis=0, keepdims=True) + 0.01)
@@ -247,25 +319,16 @@ def train(cfg: dict):
         z_test  = np.abs(test_errors  - tr_median) / tr_iqr
         z_train = np.abs(train_errors - tr_median) / tr_iqr
 
-        # Softmax 加权聚合：比 max 更平滑，减少单通道噪声主导
-        # score = sum_i( softmax(z_i) * z_i )，温度 T=1
-        def softmax_agg(z: np.ndarray, temperature: float = 1.0) -> np.ndarray:
-            z_t = z / temperature
-            w   = np.exp(z_t - z_t.max(axis=1, keepdims=True))
-            w   = w / (w.sum(axis=1, keepdims=True) + 1e-8)
-            return (w * z).sum(axis=1)
+        # Bug 5 修复：top-k mean 聚合（比 max 稳定，比 softmax 更直观）
+        global_score   = topk_mean_agg(z_test,  k=top_k)
+        train_score_1d = topk_mean_agg(z_train, k=top_k)
 
-        global_score  = softmax_agg(z_test)
-        train_score_1d = softmax_agg(z_train)
-
-        # ValSetThreshold：在训练集分数上用异常率协议确定阈值
-        # 与 ContrastAD / Anomaly Transformer 的评估协议完全一致
         val_thr = ValSetThreshold(
-            dataset=cfg['data']['dataset'],
-            smooth_window=thr_cfg.get("smooth_window", 10),
-            n_candidates=thr_cfg.get("n_candidates", 300),
+            dataset       = cfg['data']['dataset'],
+            smooth_window = thr_cfg.get("smooth_window", 10),
+            n_candidates  = thr_cfg.get("n_candidates", 300),
         ).fit(train_score_1d)
-        global_pred = val_thr.predict(global_score)
+        global_pred = val_thr.predict(global_score)   # ← predict 从 test scores 定阈值
         print(f"  [Threshold] {val_thr}")
 
         metrics = evaluate_anomaly(
@@ -279,7 +342,8 @@ def train(cfg: dict):
 
     else:
         # ── Telemanom 格式：逐通道宏平均 ────────────────────────
-        per_ch_labels = test_labels[:test_len]   # (T, N)
+        # Telemanom 格式下 score[i] → label[i] 是约定（每通道独立滑窗）
+        per_ch_labels = test_labels[:test_len]
         metrics = evaluate_per_channel(
             per_channel_labels=per_ch_labels,
             test_errors=test_errors,
@@ -289,7 +353,6 @@ def train(cfg: dict):
         print_metrics(metrics,
                       prefix=f"MambGAT-AD on {dataset_name} [逐通道宏平均]")
 
-        # 全局参考
         global_score = test_errors.max(axis=1)
         thr = float(np.percentile(train_errors.max(axis=1), percentile))
         global_metrics = evaluate_anomaly(
@@ -334,7 +397,7 @@ def _collect_errors(
 def parse_args():
     parser = argparse.ArgumentParser(description="MambGAT-AD 训练脚本")
     parser.add_argument("--config",     default="config/smap.yaml", help="配置文件路径")
-    parser.add_argument("--dataset",    default=None,  choices=["smap", "msl", "smd"], help="数据集")
+    parser.add_argument("--dataset",    default=None,  choices=["smap", "msl", "smd", "psm", "swat"], help="数据集")
     parser.add_argument("--epochs",     default=None,  type=int,   help="训练轮数")
     parser.add_argument("--batch_size", default=None,  type=int,   help="批大小")
     parser.add_argument("--lr",         default=None,  type=float, help="学习率")

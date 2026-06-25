@@ -164,10 +164,11 @@ class ValSetThreshold:
         n_candidates: int = 300,
         smooth_window: int = 10,
     ):
-        self.val_ratio     = val_ratio
-        self.n_candidates  = n_candidates
-        self.smooth_window = smooth_window
-        self.threshold_    = None
+        self.val_ratio          = val_ratio
+        self.n_candidates       = n_candidates
+        self.smooth_window      = smooth_window
+        self.threshold_         = None
+        self._anomaly_ratio_mode = False
 
         # 确定异常率
         if anomaly_ratio is not None:
@@ -223,22 +224,33 @@ class ValSetThreshold:
                 if f1 > best_f1:
                     best_f1, best_thr = f1, thr
 
-            self.threshold_ = float(best_thr)
-            self._fit_mode  = f"val-F1-PA (best_f1={best_f1:.4f})"
+            self.threshold_          = float(best_thr)
+            self._anomaly_ratio_mode = False
+            self._fit_mode           = f"val-F1-PA (best_f1={best_f1:.4f})"
 
         else:
-            # ── 无标注：anomaly-ratio 阈值（与 ContrastAD 协议一致）──
-            # 取训练集分数的 (1 - anomaly_ratio) 分位数
-            # 即：预期测试集中最高 anomaly_ratio 比例的点为异常
-            pct = 100.0 * (1.0 - self.anomaly_ratio)
-            self.threshold_ = float(np.percentile(scores, pct))
-            self._fit_mode  = f"anomaly-ratio ({self.anomaly_ratio:.4f})"
+            # ── 无标注：anomaly-ratio 模式 ────────────────────────────
+            # threshold_ 占位（predict 时会从测试分数重新计算，见 predict()）
+            self.threshold_          = 0.0   # 占位，不用于实际判断
+            self._anomaly_ratio_mode = True
+            self._fit_mode           = f"anomaly-ratio ({self.anomaly_ratio:.4f}, 从测试分数计算)"
 
         return self
 
     def predict(self, scores: np.ndarray) -> np.ndarray:
+        """
+        Bug 3 修复：anomaly-ratio 模式下阈值从 **测试分数** 实时计算，
+        与 ContrastAD / Anomaly Transformer 的标准协议完全一致。
+        val-F1-PA 模式保持不变（使用 fit 期间搜到的最优阈值）。
+        """
         assert self.threshold_ is not None, "请先调用 fit()"
         smoothed = self._smooth(scores)
+        if getattr(self, "_anomaly_ratio_mode", False):
+            # anomaly-ratio 协议：取测试分数 top anomaly_ratio% 为异常
+            # 每次从输入分数现算，保证与论文协议一致
+            pct = 100.0 * (1.0 - self.anomaly_ratio)
+            thr = float(np.percentile(smoothed, pct))
+            return (smoothed > thr).astype(int)
         return (smoothed > self.threshold_).astype(int)
 
     def __repr__(self):

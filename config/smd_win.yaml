@@ -1,18 +1,12 @@
-# ──────────────────────────────────────────────────────────────
-# MambGAT-AD | SMD WSL 配置（A4000-16GB）
-# SMD 训练集 ~566k 步，step=10 减少到 ~56k 样本
-# ──────────────────────────────────────────────────────────────
-
 data:
   dataset: smd
   format: AT
   data_dir: ./datasets/AT/SMD
   label_file: null
   window_size: 100
-  window_step: 10                # SMD 数据量大，step=10 控制训练时间
+  window_step: 10
   test_step: 1
   normalize: true
-
 model:
   d_model: 128
   d_state: 16
@@ -22,18 +16,18 @@ model:
   n_blocks: 3
   dropout: 0.1
   pred_len: 1
-
 train:
   epochs: 50
-  batch_size: 32                 # N=38，适中
-  lr: 1.0e-3
-  weight_decay: 1.0e-5
+  batch_size: 32
+  lr: 0.001
+  weight_decay: 1.0e-05
   patience: 7
   device: cuda
   seed: 42
   save_dir: ./checkpoints
   num_workers: 0
-
 threshold:
-  method: percentile
-  percentile: 99.5
+  method: valset
+  smooth_window: 10
+  n_candidates: 300
+  top_k: 3

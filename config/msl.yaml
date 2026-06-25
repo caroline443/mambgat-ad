@@ -1,7 +1,3 @@
-# ──────────────────────────────────────────────────────────────
-# MambGAT-AD | MSL 配置（好奇号火星车，AT 格式）
-# ──────────────────────────────────────────────────────────────
-
 data:
   dataset: msl
   format: AT
@@ -11,7 +7,6 @@ data:
   window_step: 1
   test_step: 1
   normalize: true
-
 model:
   d_model: 128
   d_state: 16
@@ -21,18 +16,18 @@ model:
   n_blocks: 3
   dropout: 0.1
   pred_len: 1
-
 train:
   epochs: 50
-  batch_size: 32                       # N=55，GAT矩阵是SMAP的4.8x，需要小batch
-  lr: 1.0e-3
-  weight_decay: 1.0e-5
+  batch_size: 32
+  lr: 0.001
+  weight_decay: 1.0e-05
   patience: 7
   device: cuda
   seed: 42
   save_dir: ./checkpoints
   num_workers: 4
-
 threshold:
-  method: percentile
-  percentile: 99.5
+  method: valset
+  smooth_window: 10
+  n_candidates: 300
+  top_k: 5

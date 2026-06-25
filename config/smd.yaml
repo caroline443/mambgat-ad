@@ -1,17 +1,12 @@
-# ──────────────────────────────────────────────────────────────
-# MambGAT-AD | SMD 配置（服务器机器数据集，AT 格式）
-# ──────────────────────────────────────────────────────────────
-
 data:
   dataset: smd
   format: AT
   data_dir: ./datasets/AT/SMD
   label_file: null
   window_size: 100
-  window_step: 10                      # SMD数据量大，step=10 减少到~56k样本
+  window_step: 10
   test_step: 1
   normalize: true
-
 model:
   d_model: 128
   d_state: 16
@@ -21,18 +16,18 @@ model:
   n_blocks: 3
   dropout: 0.1
   pred_len: 1
-
 train:
   epochs: 50
-  batch_size: 64                       # N=38，GAT矩阵是SMAP的2.3x
-  lr: 1.0e-3
-  weight_decay: 1.0e-5
+  batch_size: 64
+  lr: 0.001
+  weight_decay: 1.0e-05
   patience: 7
   device: cuda
   seed: 42
   save_dir: ./checkpoints
   num_workers: 4
-
 threshold:
-  method: percentile
-  percentile: 99.5
+  method: valset
+  smooth_window: 10
+  n_candidates: 300
+  top_k: 3

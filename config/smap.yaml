@@ -1,19 +1,12 @@
-# ──────────────────────────────────────────────────────────────
-# MambGAT-AD | SMAP 主实验配置（Anomaly Transformer 格式）
-# 与 GDN、OmniAnomaly、Anomaly Transformer 等论文直接可比
-# 数据：https://drive.google.com/drive/folders/1gisthCoE-RrKJ0j3KPV7xiibhHWT9qRm
-# ──────────────────────────────────────────────────────────────
-
 data:
   dataset: smap
-  format: AT                           # AT | telemanom
+  format: AT
   data_dir: ./datasets/AT/SMAP
-  label_file: null                     # AT格式不需要
+  label_file: null
   window_size: 100
   window_step: 1
   test_step: 1
   normalize: true
-
 model:
   d_model: 128
   d_state: 16
@@ -23,21 +16,18 @@ model:
   n_blocks: 3
   dropout: 0.1
   pred_len: 1
-
 train:
   epochs: 50
-  batch_size: 128                      # 原生 mamba-ssm，V100 32GB 可用
-  lr: 1.0e-3
-  weight_decay: 1.0e-5
+  batch_size: 128
+  lr: 0.001
+  weight_decay: 1.0e-05
   patience: 7
   device: cuda
   seed: 42
   save_dir: ./checkpoints
   num_workers: 4
-
 threshold:
-  # valset: 用异常率协议确定阈值，与 ContrastAD / Anomaly Transformer 直接可比
-  # anomaly_ratio 自动从数据集名称读取（SMAP=13.13%）
   method: valset
-  smooth_window: 10      # 对全局分数做滑动平均，减少毛刺
-  n_candidates: 300      # 阈值搜索候选数（越多越精确）
+  smooth_window: 10
+  n_candidates: 300
+  top_k: 3
