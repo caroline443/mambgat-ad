@@ -32,7 +32,7 @@ from data import build_loaders
 from models import MambGATAD, PredictionLoss
 from utils import evaluate_anomaly, print_metrics
 from utils.metrics import evaluate_per_channel
-from utils.threshold import PerChannelThreshold
+from utils.threshold import PerChannelThreshold, ValSetThreshold
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -239,7 +239,7 @@ def train(cfg: dict):
 
         # GDN 风格 IQR 归一化（Deng & Hooi, AAAI 2021）
         # score_i = |err_i - median_train_i| / IQR_train_i
-        # 使各通道量级统一，消除"天然高误差通道"对 max 聚合的主导
+        # 使各通道量级统一，消除高误差通道对聚合的主导
         tr_median = np.median(train_errors, axis=0, keepdims=True)
         tr_iqr    = (np.percentile(train_errors, 75, axis=0, keepdims=True)
                      - np.percentile(train_errors, 25, axis=0, keepdims=True) + 0.01)
@@ -247,9 +247,26 @@ def train(cfg: dict):
         z_test  = np.abs(test_errors  - tr_median) / tr_iqr
         z_train = np.abs(train_errors - tr_median) / tr_iqr
 
-        global_score = z_test.max(axis=1)
-        thr          = float(np.percentile(z_train.max(axis=1), percentile))
-        global_pred  = (global_score > thr).astype(int)
+        # Softmax 加权聚合：比 max 更平滑，减少单通道噪声主导
+        # score = sum_i( softmax(z_i) * z_i )，温度 T=1
+        def softmax_agg(z: np.ndarray, temperature: float = 1.0) -> np.ndarray:
+            z_t = z / temperature
+            w   = np.exp(z_t - z_t.max(axis=1, keepdims=True))
+            w   = w / (w.sum(axis=1, keepdims=True) + 1e-8)
+            return (w * z).sum(axis=1)
+
+        global_score  = softmax_agg(z_test)
+        train_score_1d = softmax_agg(z_train)
+
+        # ValSetThreshold：在训练集分数上用异常率协议确定阈值
+        # 与 ContrastAD / Anomaly Transformer 的评估协议完全一致
+        val_thr = ValSetThreshold(
+            dataset=cfg['data']['dataset'],
+            smooth_window=thr_cfg.get("smooth_window", 10),
+            n_candidates=thr_cfg.get("n_candidates", 300),
+        ).fit(train_score_1d)
+        global_pred = val_thr.predict(global_score)
+        print(f"  [Threshold] {val_thr}")
 
         metrics = evaluate_anomaly(
             y_true=global_label, y_pred=global_pred,

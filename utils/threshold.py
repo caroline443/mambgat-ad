@@ -1,22 +1,59 @@
 """
-动态阈值模块（修复版）
+动态阈值模块
 
-修复内容：
-  - Telemanom：n_seqs^2 改为 n_seqs（线性惩罚，不过度压低阈值）
-  - 新增 PercentileThreshold（默认推荐，简单可靠）
-  - 评估改用逐通道模式，不再依赖全局阈值
+包含三种阈值策略：
+  1. TelemanomThreshold  — 原始 Telemanom 非参数自适应阈值（修复版）
+  2. PercentileThreshold — 固定分位数阈值（简单基线）
+  3. ValSetThreshold     — 验证集自适应阈值（推荐，AUC 最优）
+     在验证集分数上搜索使 F1-PA 最大的阈值，避免 percentile 固定值
+     与真实异常率不匹配的问题。
 
-参考：Hundman et al., KDD 2018
+参考：
+  Hundman et al., KDD 2018 (Telemanom)
+  Deng & Hooi, AAAI 2021 (GDN)
+  Kim et al., AAAI 2022 (PA 批评)
 """
 
 from __future__ import annotations
 
 import numpy as np
-from typing import Tuple
+from typing import Tuple, Optional
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Telemanom 阈值（修复版）
+# 工具函数
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _count_sequences(arr: np.ndarray) -> int:
+    count, in_seq = 0, False
+    for v in arr:
+        if v == 1 and not in_seq:
+            count += 1; in_seq = True
+        elif v == 0:
+            in_seq = False
+    return count
+
+
+def _point_adjust(y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
+    """Point Adjustment：异常段内任意一点命中则整段算对。"""
+    y_adj = y_pred.copy()
+    in_anomaly = False
+    for i in range(len(y_true)):
+        if y_true[i] == 1 and y_pred[i] == 1 and not in_anomaly:
+            in_anomaly = True
+            for j in range(i, -1, -1):
+                if y_true[j] == 0:
+                    break
+                y_adj[j] = 1
+        elif y_true[i] == 0:
+            in_anomaly = False
+        if in_anomaly:
+            y_adj[i] = 1
+    return y_adj
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. Telemanom 阈值（修复版）
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TelemanomThreshold:
@@ -55,7 +92,6 @@ class TelemanomThreshold:
                 continue
             above = smoothed[smoothed > eps]
             reduction = (above - eps).sum() / (smoothed.sum() + 1e-8)
-            # 修复：线性惩罚而不是平方，避免过度压低阈值
             score = reduction / max(1, n_seqs)
             if score > max_score:
                 max_score = score
@@ -69,18 +105,8 @@ class TelemanomThreshold:
         return (smoothed > self.threshold_).astype(int)
 
 
-def _count_sequences(arr: np.ndarray) -> int:
-    count, in_seq = 0, False
-    for v in arr:
-        if v == 1 and not in_seq:
-            count += 1; in_seq = True
-        elif v == 0:
-            in_seq = False
-    return count
-
-
 # ─────────────────────────────────────────────────────────────────────────────
-# 分位数阈值（推荐默认）
+# 2. 分位数阈值（简单基线）
 # ─────────────────────────────────────────────────────────────────────────────
 
 class PercentileThreshold:
@@ -97,6 +123,128 @@ class PercentileThreshold:
     def predict(self, errors: np.ndarray) -> np.ndarray:
         assert self.threshold_ is not None
         return (errors > self.threshold_).astype(int)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. 验证集自适应阈值（推荐）
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ValSetThreshold:
+    """
+    在验证集分数上搜索使 F1-PA 最大的阈值。
+
+    核心思路：
+      - 用训练集后 val_ratio 比例的数据作为"伪验证集"
+      - 在验证集分数上枚举候选阈值，选 F1-PA 最大的
+      - 若验证集无标注（无监督场景），退化为异常率阈值：
+        取 score 最高的 anomaly_ratio% 为异常
+
+    Args:
+        val_ratio:      从训练集末尾切出的验证比例（默认 0.2）
+        anomaly_ratio:  数据集已知异常率，用于无标注退化模式
+                        （SMAP=0.1313, MSL=0.1072, SMD=0.0416）
+        n_candidates:   阈值搜索候选数（越多越精确，越慢）
+        smooth_window:  对分数做滑动平均的窗口（0=不平滑）
+    """
+
+    # 各数据集标注异常率（来自 ContrastAD Table 1）
+    ANOMALY_RATIO = {
+        "smap": 0.1313,
+        "msl":  0.1072,
+        "smd":  0.0416,
+        "psm":  0.2776,
+        "swat": 0.1214,
+    }
+
+    def __init__(
+        self,
+        val_ratio: float = 0.2,
+        anomaly_ratio: float = None,
+        dataset: str = None,
+        n_candidates: int = 300,
+        smooth_window: int = 10,
+    ):
+        self.val_ratio     = val_ratio
+        self.n_candidates  = n_candidates
+        self.smooth_window = smooth_window
+        self.threshold_    = None
+
+        # 确定异常率
+        if anomaly_ratio is not None:
+            self.anomaly_ratio = anomaly_ratio
+        elif dataset is not None:
+            self.anomaly_ratio = self.ANOMALY_RATIO.get(
+                dataset.lower(), 0.10
+            )
+        else:
+            self.anomaly_ratio = 0.10   # 保守默认值
+
+    def _smooth(self, scores: np.ndarray) -> np.ndarray:
+        if self.smooth_window <= 1:
+            return scores
+        kernel = np.ones(self.smooth_window) / self.smooth_window
+        return np.convolve(scores, kernel, mode='same')
+
+    def fit(
+        self,
+        train_scores: np.ndarray,
+        val_labels: Optional[np.ndarray] = None,
+    ) -> "ValSetThreshold":
+        """
+        Args:
+            train_scores: (T_train,) 训练集全局异常分数
+            val_labels:   (T_val,)  验证集标注（可选）
+                          若提供，在验证集上搜索最优 F1-PA 阈值；
+                          若不提供，用异常率阈值（anomaly-ratio 协议）。
+        """
+        scores = self._smooth(train_scores)
+
+        if val_labels is not None and val_labels.sum() > 0:
+            # ── 有标注：搜索最优 F1-PA 阈值 ──────────────────────
+            # 取训练集末尾 val_ratio 的分数作为验证集分数
+            n_val = max(1, int(len(scores) * self.val_ratio))
+            val_scores = scores[-n_val:]
+            val_labels_cut = val_labels[-n_val:]
+
+            candidates = np.unique(
+                np.percentile(val_scores,
+                              np.linspace(50, 100, self.n_candidates))
+            )
+            best_thr, best_f1 = candidates[-1], -1.0
+            for thr in candidates:
+                pred = (val_scores > thr).astype(int)
+                pred_pa = _point_adjust(val_labels_cut, pred)
+                tp = (pred_pa * val_labels_cut).sum()
+                fp = (pred_pa * (1 - val_labels_cut)).sum()
+                fn = ((1 - pred_pa) * val_labels_cut).sum()
+                p  = tp / (tp + fp + 1e-8)
+                r  = tp / (tp + fn + 1e-8)
+                f1 = 2 * p * r / (p + r + 1e-8)
+                if f1 > best_f1:
+                    best_f1, best_thr = f1, thr
+
+            self.threshold_ = float(best_thr)
+            self._fit_mode  = f"val-F1-PA (best_f1={best_f1:.4f})"
+
+        else:
+            # ── 无标注：anomaly-ratio 阈值（与 ContrastAD 协议一致）──
+            # 取训练集分数的 (1 - anomaly_ratio) 分位数
+            # 即：预期测试集中最高 anomaly_ratio 比例的点为异常
+            pct = 100.0 * (1.0 - self.anomaly_ratio)
+            self.threshold_ = float(np.percentile(scores, pct))
+            self._fit_mode  = f"anomaly-ratio ({self.anomaly_ratio:.4f})"
+
+        return self
+
+    def predict(self, scores: np.ndarray) -> np.ndarray:
+        assert self.threshold_ is not None, "请先调用 fit()"
+        smoothed = self._smooth(scores)
+        return (smoothed > self.threshold_).astype(int)
+
+    def __repr__(self):
+        mode = getattr(self, "_fit_mode", "未拟合")
+        return (f"ValSetThreshold(thr={self.threshold_:.6f}, "
+                f"mode={mode})")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

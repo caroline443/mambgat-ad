@@ -36,5 +36,8 @@ train:
   num_workers: 4
 
 threshold:
-  method: percentile
-  percentile: 99.5
+  # valset: 用异常率协议确定阈值，与 ContrastAD / Anomaly Transformer 直接可比
+  # anomaly_ratio 自动从数据集名称读取（SMAP=13.13%）
+  method: valset
+  smooth_window: 10      # 对全局分数做滑动平均，减少毛刺
+  n_candidates: 300      # 阈值搜索候选数（越多越精确）

@@ -21,7 +21,7 @@ import torch
 from data import build_loaders
 from models import MambGATAD
 from utils import evaluate_anomaly, print_metrics
-from utils.threshold import PerChannelThreshold
+from utils.threshold import PerChannelThreshold, ValSetThreshold
 
 
 def evaluate(args):
@@ -96,11 +96,28 @@ def evaluate(args):
         tr_median = np.median(train_errors, axis=0, keepdims=True)
         tr_iqr    = (np.percentile(train_errors, 75, axis=0, keepdims=True)
                      - np.percentile(train_errors, 25, axis=0, keepdims=True) + 0.01)
-        z_test    = np.abs(test_errors  - tr_median) / tr_iqr
-        z_train   = np.abs(train_errors - tr_median) / tr_iqr
-        global_score = z_test.max(axis=1)
-        thr          = float(np.percentile(z_train.max(axis=1), percentile))
-        global_pred  = (global_score > thr).astype(int)
+        z_test  = np.abs(test_errors  - tr_median) / tr_iqr
+        z_train = np.abs(train_errors - tr_median) / tr_iqr
+
+        # Softmax 加权聚合：比 max 更平滑，减少单通道噪声主导
+        def softmax_agg(z: np.ndarray, temperature: float = 1.0) -> np.ndarray:
+            z_t = z / temperature
+            w   = np.exp(z_t - z_t.max(axis=1, keepdims=True))
+            w   = w / (w.sum(axis=1, keepdims=True) + 1e-8)
+            return (w * z).sum(axis=1)
+
+        global_score   = softmax_agg(z_test)
+        train_score_1d = softmax_agg(z_train)
+
+        # ValSetThreshold：anomaly-ratio 协议，与 ContrastAD 直接可比
+        thr_cfg = cfg.get("threshold", {})
+        val_thr = ValSetThreshold(
+            dataset=dataset_name,
+            smooth_window=thr_cfg.get("smooth_window", 10),
+            n_candidates=thr_cfg.get("n_candidates", 300),
+        ).fit(train_score_1d)
+        global_pred = val_thr.predict(global_score)
+        print(f"[Threshold] {val_thr}")
 
         metrics = evaluate_anomaly(
             y_true=global_label, y_pred=global_pred,
