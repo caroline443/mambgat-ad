@@ -293,8 +293,8 @@ def train(cfg: dict):
         num_workers    = 0,
     )
 
-    train_errors = _collect_errors(model, full_train_loader, device)
-    test_errors  = _collect_errors(model, test_loader, device)
+    train_errors = _collect_errors(model, full_train_loader, device, desc="训练集推理")
+    test_errors  = _collect_errors(model, test_loader,       device, desc="测试集推理")
 
     # ── 评估 ─────────────────────────────────────────────────────
     import json
@@ -384,12 +384,13 @@ def _collect_errors(
     model: MambGATAD,
     loader,
     device: torch.device,
+    desc: str = "推理",
 ) -> np.ndarray:
     """推理并收集所有批次的预测误差，返回 (T, N) numpy 数组"""
     model.eval()
     all_scores = []
     with torch.no_grad():
-        for x_batch, _ in loader:
+        for x_batch, _ in tqdm(loader, desc=f"  [{desc}]", ncols=80, leave=False):
             x_batch = x_batch.to(device, dtype=torch.float32)
             _, __, score = model(x_batch)    # (B, N)
             all_scores.append(score.cpu().numpy())
