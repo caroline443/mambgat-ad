@@ -202,6 +202,23 @@ class MambGATAD(nn.Module):
 
         return pred, recon, score, aux_loss
 
+    def encode(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        只跑 encoder，返回最后时间步的特征，用于表示空间异常评分。
+        供 ablation.py / fast_compare.py 的 repr 评分使用。
+
+        Args:
+            x: (B, T, N)
+        Returns:
+            (B, N, D)
+        """
+        B, T, N = x.shape
+        x_in = x.permute(0, 2, 1).reshape(B * N, T, 1)
+        h    = self.input_proj(x_in)                      # (B*N, T, D)
+        h    = self.encoder(h)                             # (B*N, T, D)
+        last = h[:, -1, :]                                 # (B*N, D)
+        return last.reshape(B, N, self.d_model)            # (B, N, D)
+
     def count_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 

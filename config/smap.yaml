@@ -1,47 +1,40 @@
-# MambGAT-AD v0 配置 — SMAP
-# 渐进式开发：每次只改 model 部分，其余保持不变
-
 data:
-  dataset:     smap
-  format:      AT                        # AT格式：SMAP_train.npy / SMAP_test.npy
-  data_dir:    ./datasets/AT/SMAP
-  label_file:  null
+  dataset: smap
+  format: AT
+  data_dir: ./datasets/AT/SMAP
+  label_file: null
   window_size: 100
-  window_step: 1
-  test_step:   1
-  normalize:   true
-
+  window_step: 5
+  test_step: 1
+  normalize: true
 model:
-  # v0 参数（极简）
-  d_model:  64
-  n_blocks:  2
-  d_state:  16
-  d_conv:    4
-  expand:    2
-  pred_len:  1
-  dropout:  0.1
-  # v1+ 参数（v0 忽略，保留供后续版本使用）
-  n_heads:   4
-  top_k:    null
-  patch_sizes: [4, 8, 16]
+  d_model: 64
+  n_blocks: 2
+  d_state: 16
+  d_conv: 4
+  expand: 2
+  pred_len: 1
+  dropout: 0.1
+  n_heads: 4
+  top_k: null
+  patch_sizes:
+  - 4
+  - 8
+  - 16
   n_snapshots: 4
-
 train:
-  epochs:       50
-  batch_size:   128
-  lr:           1.0e-3
-  weight_decay: 1.0e-4
-  patience:     7
-  device:       cuda
-  seed:         42
-  save_dir:     ./checkpoints
-  num_workers:  4
-  val_ratio:    0.2
-
+  epochs: 50
+  batch_size: 128
+  lr: 0.001
+  weight_decay: 0.0001
+  patience: 7
+  device: cuda
+  seed: 42
+  save_dir: ./checkpoints
+  num_workers: 4
+  val_ratio: 0.2
 loss:
-  # v0：只用 pred + recon
-  beta:     0.5
-  # v2+ 参数（v0 忽略）
-  lambda1:  0.1
-  lambda2:  0.05
+  beta: 0.5
+  lambda1: 0.1
+  lambda2: 0.05
   lambda_c: 0.0
