@@ -73,9 +73,10 @@ def collect_scores(model: MambGATAD, loader: DataLoader, device: torch.device) -
 
         pred, recon, _, _ = model(x_batch)
 
-        pred_err  = (pred.squeeze(-1) - y_batch).abs()      # (B, N)
-        recon_err = (recon - x_batch).abs().mean(dim=1)     # (B, N)
-        score = pred_err + recon_err                         # (B, N)
+        pred_err  = (pred.squeeze(-1) - y_batch).abs()               # (B, N)
+        # 修复1: 只用最后一步重建误差（与 ContrastAD 协议一致）
+        recon_err = (recon[:, -1, :] - x_batch[:, -1, :]).abs()      # (B, N)
+        score = pred_err + recon_err                                   # (B, N)
 
         all_scores.append(score.cpu().numpy())
 
@@ -108,15 +109,14 @@ def evaluate(
     print("  [评估] 收集测试集分数...")
     test_scores  = collect_scores(model, test_loader,  device)   # (T_te, N)
 
-    # ── IQR 归一化（GDN 协议）────────────────────────────────────
-    tr_med = np.median(train_scores, axis=0, keepdims=True)
-    tr_iqr = (np.percentile(train_scores, 75, axis=0, keepdims=True)
-              - np.percentile(train_scores, 25, axis=0, keepdims=True) + 1e-4)
-    z_test = np.abs(test_scores - tr_med) / tr_iqr              # (T_te, N)
+    # ── 单向 z-score 归一化（修复：不用 abs，方向不反转）──────────
+    tr_mean = train_scores.mean(axis=0, keepdims=True)
+    tr_std  = train_scores.std(axis=0, keepdims=True) + 1e-4
+    z_test  = (test_scores - tr_mean) / tr_std                  # (T_te, N)
+    z_test  = np.clip(z_test, 0, None)                          # 只保留高于训练均值的部分
 
-    # ── top-3 均值聚合 → 全局分数 ────────────────────────────────
-    k = min(3, z_test.shape[1])
-    global_score = np.partition(z_test, -k, axis=1)[:, -k:].mean(axis=1)  # (T_te,)
+    # ── 全通道均值聚合 → 全局分数 ────────────────────────────────
+    global_score = z_test.mean(axis=1)                          # (T_te,)
 
     # ── 标签对齐（窗口末尾对应 label[i + W - 1]）─────────────────
     T_score = len(global_score)
@@ -127,29 +127,38 @@ def evaluate(
         T_score = len(label)
 
     # ── 计算指标 ─────────────────────────────────────────────────
-    from sklearn.metrics import roc_auc_score as _auc
-    auc = float(_auc(label, global_score)) if label.sum() > 0 else 0.0
+    from sklearn.metrics import (roc_auc_score as _auc,
+        f1_score, precision_score, recall_score)
 
-    # F1-PA（anomaly-ratio 阈值，与 ContrastAD Table 2 直接可比）
+    # 标准 AUC-ROC（连续分数，供参考）
+    std_auc = float(_auc(label, global_score)) if label.sum() > 0 else 0.0
+
+    # F1-PA（anomaly-ratio 阈值）
     y_pred_ar    = anomaly_ratio_threshold(label, global_score, dataset=dataset_name)
     y_pred_ar_pa = point_adjust(label, y_pred_ar)
-    from sklearn.metrics import f1_score, precision_score, recall_score
     f1_pa  = float(f1_score(label, y_pred_ar_pa, zero_division=0))
     prec   = float(precision_score(label, y_pred_ar_pa, zero_division=0))
     rec    = float(recall_score(label, y_pred_ar_pa, zero_division=0))
 
+    # ContrastAD-compatible AUC（与论文数字直接可比）
+    # = roc_auc_score(labels, binary_PA_pred) = (TPR + TNR) / 2
+    # 对应 ContrastAD: ts_metrics(labels, point_adjustment(labels, score))
+    ca_auc = float(_auc(label, y_pred_ar_pa)) if label.sum() > 0 else 0.0
+
     metrics = {
-        "auc_roc":    auc,
-        "f1_pa_ar":   f1_pa,
-        "prec_pa_ar": prec,
-        "rec_pa_ar":  rec,
+        "auc_roc":        std_auc,
+        "contrastAD_auc": ca_auc,
+        "f1_pa_ar":       f1_pa,
+        "prec_pa_ar":     prec,
+        "rec_pa_ar":      rec,
     }
 
-    print(f"\n{'─'*50}")
+    print(f"\n{'─'*58}")
     print(f"  数据集: {dataset_name.upper()}")
-    print(f"  AUC-ROC  : {auc:.4f}   ← 与 ContrastAD 直接比")
+    print(f"  AUC-ROC (标准/连续分数) : {std_auc:.4f}")
+    print(f"  AUC-ROC (ContrastAD协议): {ca_auc:.4f}  ← 与论文直接比")
     print(f"  F1-PA(AR): {f1_pa:.4f}  Prec={prec:.4f}  Rec={rec:.4f}")
-    print(f"{'─'*50}")
+    print(f"{'─'*58}")
 
     return metrics
 
