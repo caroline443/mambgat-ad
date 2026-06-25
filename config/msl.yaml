@@ -3,7 +3,7 @@
 data:
   dataset:     msl
   format:      AT
-  data_dir:    ./datasets/AT
+  data_dir:    ./datasets/AT/MSL
   label_file:  null
   window_size: 100
   window_step: 1
@@ -29,10 +29,10 @@ train:
   lr:           1.0e-3
   weight_decay: 1.0e-4
   patience:     7
-  device:       cuda       # 服务器 GPU；本地 Mac 改为 mps 或 cpu
+  device:       cuda
   seed:         42
   save_dir:     ./checkpoints
-  num_workers:  0
+  num_workers:  4
   val_ratio:    0.2
 
 loss:
