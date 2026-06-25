@@ -1,27 +1,16 @@
 {
-  "per_channel_macro": {
-    "vus_roc": 0.619839,
-    "f1_pa": 0.375781,
-    "rec_pa": 0.531026,
-    "vus_pr": 0.250605,
-    "rec_raw": 0.226701,
-    "prec_raw": 0.219589,
-    "f1_raw": 0.140939,
-    "prec_pa": 0.352701,
-    "auc_roc": 0.618523,
-    "auc_pr": 0.227248,
-    "n_channels_evaluated": 50.0
-  },
-  "global_reference": {
-    "f1_raw": 0.796206,
-    "prec_raw": 0.679353,
-    "rec_raw": 0.96161,
-    "f1_pa": 0.815039,
-    "prec_pa": 0.687819,
-    "rec_pa": 1.0,
-    "auc_roc": 0.66171,
-    "auc_pr": 0.847408,
-    "vus_roc": 0.639344,
-    "vus_pr": 0.864683
-  }
+  "f1_raw": 0.002726,
+  "prec_raw": 0.071429,
+  "rec_raw": 0.001389,
+  "f1_pa": 0.6842,
+  "prec_pa": 0.967004,
+  "rec_pa": 0.529381,
+  "auc_roc": 0.508594,
+  "auc_pr": 0.120457,
+  "vus_roc": 0.50957,
+  "vus_pr": 0.136392,
+  "f1_pa_best": 0.830128,
+  "f1_pa_ar": 0.673251,
+  "prec_pa_ar": 0.512037,
+  "rec_pa_ar": 0.982631
 }
