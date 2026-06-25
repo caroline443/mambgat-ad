@@ -56,10 +56,13 @@ def collect_scores(model, loader, device):
     model.eval()
     scores = []
     with torch.no_grad():
-        for xb, _ in loader:
+        for xb, yb in loader:
             xb = xb.to(device, dtype=torch.float32)
-            _, __, sc, ___ = model(xb)
-            scores.append(sc.cpu().numpy())
+            yb = yb.to(device, dtype=torch.float32)
+            pred, recon, _, ___ = model(xb)
+            pred_err  = (pred.squeeze(-1) - yb).abs()
+            recon_err = (recon - xb).abs().mean(dim=1)
+            scores.append((pred_err + recon_err).cpu().numpy())
     return np.concatenate(scores, axis=0)   # (T, N)
 
 

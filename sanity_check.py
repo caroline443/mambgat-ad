@@ -56,7 +56,7 @@ def main():
 
     # ── 前向传播 ──────────────────────────────────────────────────
     x = torch.randn(BATCH_SIZE, WINDOW_SIZE, N_CHANNELS).to(device)
-    pred, recon, score = model(x)
+    pred, recon, score, contrast_loss = model(x)
 
     assert pred.shape  == (BATCH_SIZE, N_CHANNELS, 1), \
         f"pred 形状错误: {pred.shape}"
@@ -67,7 +67,7 @@ def main():
     # ── 反向传播 ──────────────────────────────────────────────────
     y = torch.randn(BATCH_SIZE, N_CHANNELS).to(device)
     criterion = PredictionLoss()
-    loss = criterion(pred, y, recon=recon, x=x)
+    loss = criterion(pred, y, recon=recon, x=x, contrast_loss=contrast_loss)
     loss.backward()
     print(f"[OK] 反向传播通过  loss={loss.item():.4f}")
 

@@ -163,7 +163,8 @@ def run_experiment(
     X_te, Y_te = make_windows(test_data,  WINDOW, step=1)
 
     # 测试集标签对齐（窗口末尾对应的标签）
-    label_offset = WINDOW  # 窗口 i 对应 test_data[i+WINDOW-1]
+    # score[i] 基于 pred(data[i+W])，对齐 label[i+W]，偏移 = WINDOW
+    label_offset = WINDOW
     te_labels_aligned = test_labels[WINDOW : WINDOW + len(X_te)]
     if len(te_labels_aligned) < len(X_te):
         X_te = X_te[:len(te_labels_aligned)]
@@ -229,19 +230,18 @@ def run_experiment(
         optimizer, T_max=n_epochs, eta_min=1e-6
     )
 
-    # ── 训练集统计（用于 IQR 归一化）──────────────────────────
-    # 先跑一遍训练集收集误差，用于后续归一化
-    def collect_scores(loader, training=False):
-        if training:
-            model.train()
-        else:
-            model.eval()
+    # ── 分数收集（用于 IQR 归一化 + AUC 评估）──────────────────
+    def collect_scores(loader):
+        model.eval()
         scores = []
-        with torch.set_grad_enabled(False):
-            for xb, _ in loader:
+        with torch.no_grad():
+            for xb, yb in loader:
                 xb = xb.to(DEVICE)
-                _, __, sc, ___ = model(xb)
-                scores.append(sc.cpu().numpy())
+                yb = yb.to(DEVICE)
+                pred, recon, _, ___ = model(xb)
+                pred_err  = (pred.squeeze(-1) - yb).abs()
+                recon_err = (recon - xb).abs().mean(dim=1)
+                scores.append((pred_err + recon_err).cpu().numpy())
         return np.concatenate(scores, axis=0)  # (T, N)
 
     history = {"epoch": [], "auc": [], "train_loss": []}

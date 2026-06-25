@@ -397,14 +397,22 @@ def _collect_errors(
     device: torch.device,
     desc: str = "推理",
 ) -> np.ndarray:
-    """推理并收集所有批次的预测误差，返回 (T, N) numpy 数组"""
+    """
+    推理并收集异常分数，返回 (T, N) numpy 数组。
+
+    pred_err 使用 y_batch（真实下一步）而非 x_last，
+    与训练目标一致：模型学的是预测 data[i+W]，分数也该对比 data[i+W]。
+    """
     model.eval()
     all_scores = []
     with torch.no_grad():
-        for x_batch, _ in tqdm(loader, desc=f"  [{desc}]", ncols=80, leave=False):
+        for x_batch, y_batch in tqdm(loader, desc=f"  [{desc}]", ncols=80, leave=False):
             x_batch = x_batch.to(device, dtype=torch.float32)
-            _, __, score, ___ = model(x_batch)    # (B, N)
-            all_scores.append(score.cpu().numpy())
+            y_batch = y_batch.to(device, dtype=torch.float32)
+            pred, recon, _, ___ = model(x_batch)
+            pred_err  = (pred.squeeze(-1) - y_batch).abs()     # (B, N)
+            recon_err = (recon - x_batch).abs().mean(dim=1)    # (B, N)
+            all_scores.append((pred_err + recon_err).cpu().numpy())
     return np.concatenate(all_scores, axis=0)   # (T, N)
 
 

@@ -84,11 +84,14 @@ def evaluate(args):
     def collect(loader, desc="推理"):
         all_s = []
         with torch.no_grad():
-            for x, _ in tqdm(loader, desc=f"[Eval] {desc}",
+            for x, y in tqdm(loader, desc=f"[Eval] {desc}",
                               ncols=80, unit="batch"):
                 x = x.to(device, dtype=torch.float32)
-                _, __, s = model(x)
-                all_s.append(s.cpu().numpy())
+                y = y.to(device, dtype=torch.float32)
+                pred, recon, _, ___ = model(x)
+                pred_err  = (pred.squeeze(-1) - y).abs()
+                recon_err = (recon - x).abs().mean(dim=1)
+                all_s.append((pred_err + recon_err).cpu().numpy())
         return np.concatenate(all_s, axis=0)
 
     train_errors = collect(train_loader, "训练集")
