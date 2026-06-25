@@ -29,6 +29,7 @@ from tqdm import tqdm
 # 数据和工具（复用现有模块）
 from data.dataset import TimeSeriesDataset, build_loaders
 from models import MambGATAD, AnomalyLoss
+import models as _models_pkg
 from utils.metrics import (
     evaluate_anomaly, print_metrics,
     roc_auc_score, point_adjust,
@@ -254,10 +255,9 @@ def train(cfg: dict):
     # ── Checkpoint ────────────────────────────────────────────────
     save_dir  = Path(cfg["train"]["save_dir"])
     save_dir.mkdir(parents=True, exist_ok=True)
-    # 版本号优先级：CLI --version > config version > 自动从模型模块名推断
+    # 版本号优先级：CLI --version > config version > models.VERSION 常量
     if "version" not in cfg:
-        mod = MambGATAD.__module__          # e.g. "models.model_v1"
-        cfg["version"] = mod.split("_")[-1] if "_v" in mod else "v0"
+        cfg["version"] = getattr(_models_pkg, "VERSION", "v0")
     version = cfg["version"]
     print(f"[Info] 实验版本: {version}")
     best_path = save_dir / f"best_{dataset_name}_{version}.pt"

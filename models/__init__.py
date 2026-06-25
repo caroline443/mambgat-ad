@@ -11,4 +11,6 @@ MambGAT-AD 模型包
 
 from .model_v2 import MambGATAD, AnomalyLoss
 
-__all__ = ["MambGATAD", "AnomalyLoss"]
+VERSION = "v2"   # train.py 用此字段自动命名 checkpoint
+
+__all__ = ["MambGATAD", "AnomalyLoss", "VERSION"]
