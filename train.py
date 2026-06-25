@@ -246,7 +246,9 @@ def train(cfg: dict):
 
     loss_cfg  = cfg.get("loss", {})
     criterion = AnomalyLoss(
-        beta = loss_cfg.get("beta", 0.5),
+        beta    = loss_cfg.get("beta",    0.5),
+        lambda1 = loss_cfg.get("lambda1", 0.0),   # v2+: 频域损失权重
+        lambda2 = loss_cfg.get("lambda2", 0.0),   # v2+: 形状损失权重
     )
 
     # ── Checkpoint ────────────────────────────────────────────────

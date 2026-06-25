@@ -238,10 +238,11 @@ class AnomalyLoss(nn.Module):
         beta: 重建损失权重（默认 0.5）
     """
 
-    def __init__(self, beta: float = 0.5):
+    def __init__(self, beta: float = 0.5, lambda1: float = 0.0, lambda2: float = 0.0):
         super().__init__()
         self.beta = beta
         self.mse  = nn.MSELoss()
+        # lambda1/lambda2 v0 忽略，保留接口兼容性
 
     def forward(
         self,
