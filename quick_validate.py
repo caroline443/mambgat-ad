@@ -23,6 +23,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.metrics import roc_auc_score
+from tqdm import tqdm
 
 sys.path.insert(0, ".")
 from models.mambgat import MambGATAD, PredictionLoss
@@ -231,11 +232,11 @@ def run_experiment(
     )
 
     # ── 分数收集（用于 IQR 归一化 + AUC 评估）──────────────────
-    def collect_scores(loader):
+    def collect_scores(loader, desc="推理"):
         model.eval()
         scores = []
         with torch.no_grad():
-            for xb, yb in loader:
+            for xb, yb in tqdm(loader, desc=f"    {desc}", ncols=80, leave=False):
                 xb = xb.to(DEVICE)
                 yb = yb.to(DEVICE)
                 pred, recon, _, ___ = model(xb)
@@ -245,19 +246,24 @@ def run_experiment(
         return np.concatenate(scores, axis=0)  # (T, N)
 
     history = {"epoch": [], "auc": [], "train_loss": []}
+    tag = f"[{model_v.upper()}]"
 
     if verbose:
-        tag = f"[{model_v.upper()}]"
         print(f"\n{tag} 参数量: {model.count_parameters():,}  "
               f"训练窗口: {len(X_tr):,}  测试窗口: {len(X_te):,}")
-        print(f"{tag} {'Epoch':>5}  {'Loss':>8}  {'AUC':>7}  {'Time':>6}")
-        print(f"{tag} {'─'*35}")
 
-    for epoch in range(1, n_epochs + 1):
+    epoch_bar = tqdm(range(1, n_epochs + 1),
+                     desc=f"{tag} 总进度", ncols=80, position=0)
+
+    for epoch in epoch_bar:
         t0 = time.time()
         model.train()
         losses = []
-        for xb, yb in tr_loader:
+
+        batch_bar = tqdm(tr_loader,
+                         desc=f"  {tag} Epoch {epoch:02d}/{n_epochs} 训练",
+                         ncols=80, leave=False, position=1)
+        for xb, yb in batch_bar:
             xb, yb = xb.to(DEVICE), yb.to(DEVICE)
             optimizer.zero_grad()
             pred, recon, _, cl = model(xb)
@@ -266,14 +272,16 @@ def run_experiment(
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             losses.append(loss.item())
+            batch_bar.set_postfix(loss=f"{loss.item():.4f}")
+
         scheduler.step()
         avg_loss = np.mean(losses)
 
         # ── 评估 AUC ──────────────────────────────────────────
         model.eval()
         with torch.no_grad():
-            tr_scores = collect_scores(tr_loader)   # (T_tr, N)
-            te_scores = collect_scores(te_loader)   # (T_te, N)
+            tr_scores = collect_scores(tr_loader, desc=f"{tag} 训练集推理")
+            te_scores = collect_scores(te_loader, desc=f"{tag} 测试集推理")
 
         # IQR 归一化（GDN 风格）
         tr_med = np.median(tr_scores, axis=0, keepdims=True)
@@ -300,9 +308,12 @@ def run_experiment(
         history["auc"].append(auc)
         history["train_loss"].append(avg_loss)
 
+        epoch_bar.set_postfix(loss=f"{avg_loss:.4f}", auc=f"{auc:.4f}")
         if verbose:
-            print(f"{tag} {epoch:>5}  {avg_loss:>8.4f}  {auc:>7.4f}  {elapsed:>5.1f}s")
+            tqdm.write(f"{tag} Epoch {epoch:02d}/{n_epochs}  "
+                       f"loss={avg_loss:.4f}  AUC={auc:.4f}  ({elapsed:.1f}s)")
 
+    epoch_bar.close()
     return history
 
 

@@ -25,6 +25,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from sklearn.metrics import roc_auc_score
+from tqdm import tqdm
 
 sys.path.insert(0, ".")
 from data.dataset import load_at_format, TimeSeriesDataset
@@ -52,11 +53,11 @@ def topk_mean_agg(z: np.ndarray, k: int = 3) -> np.ndarray:
     return topk.mean(axis=1)
 
 
-def collect_scores(model, loader, device):
+def collect_scores(model, loader, device, desc="推理"):
     model.eval()
     scores = []
     with torch.no_grad():
-        for xb, yb in loader:
+        for xb, yb in tqdm(loader, desc=f"    {desc}", ncols=80, leave=False):
             xb = xb.to(device, dtype=torch.float32)
             yb = yb.to(device, dtype=torch.float32)
             pred, recon, _, ___ = model(xb)
@@ -141,13 +142,18 @@ def run_experiment(
     # 先用随机初始化的模型跑一遍，后续每 epoch 更新
     history = {"epoch": [], "auc": [], "train_loss": []}
 
-    # 构建训练集 loader（用于收集 IQR 基准，step=1 更准确但慢，这里复用 train_loader）
-    for epoch in range(1, n_epochs + 1):
+    epoch_bar = tqdm(range(1, n_epochs + 1),
+                     desc=f"{tag} 总进度", ncols=80, position=0)
+
+    for epoch in epoch_bar:
         t0 = time.time()
         model.train()
         losses = []
 
-        for xb, yb in train_loader:
+        batch_bar = tqdm(train_loader,
+                         desc=f"  {tag} Epoch {epoch:02d}/{n_epochs} 训练",
+                         ncols=80, leave=False, position=1)
+        for xb, yb in batch_bar:
             xb = xb.to(device, dtype=torch.float32)
             yb = yb.to(device, dtype=torch.float32)
             optimizer.zero_grad()
@@ -157,14 +163,15 @@ def run_experiment(
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             losses.append(loss.item())
+            batch_bar.set_postfix(loss=f"{loss.item():.4f}")
 
         scheduler.step()
         avg_loss = float(np.mean(losses))
 
         # ── 评估 AUC ──────────────────────────────────────────────
         model.eval()
-        tr_scores = collect_scores(model, train_loader, device)   # (T_tr, N)
-        te_scores = collect_scores(model, test_loader,  device)   # (T_te, N)
+        tr_scores = collect_scores(model, train_loader, device, desc=f"{tag} 训练集推理")
+        te_scores = collect_scores(model, test_loader,  device, desc=f"{tag} 测试集推理")
 
         # IQR 归一化（GDN 风格）
         tr_med = np.median(tr_scores, axis=0, keepdims=True)
@@ -191,8 +198,11 @@ def run_experiment(
         history["auc"].append(auc)
         history["train_loss"].append(avg_loss)
 
-        print(f"{tag} {epoch:>5}  {avg_loss:>10.5f}  {auc:>8.4f}  {elapsed:>5.1f}s")
+        epoch_bar.set_postfix(loss=f"{avg_loss:.4f}", auc=f"{auc:.4f}")
+        tqdm.write(f"{tag} Epoch {epoch:02d}/{n_epochs}  "
+                   f"loss={avg_loss:.5f}  AUC={auc:.4f}  ({elapsed:.1f}s)")
 
+    epoch_bar.close()
     return history
 
 
