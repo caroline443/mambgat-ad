@@ -34,7 +34,7 @@ from data.dataset import TimeSeriesDataset
 from models import MambGATAD, PredictionLoss
 from utils import evaluate_anomaly, print_metrics
 from utils.metrics import evaluate_per_channel
-from utils.threshold import PerChannelThreshold, ValSetThreshold
+from utils.threshold import ValSetThreshold
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -126,7 +126,13 @@ def train(cfg: dict):
     val_cut     = int(len(train_np) * (1.0 - val_ratio))
 
     train_ds = TimeSeriesDataset(train_np[:val_cut], window_size, train_step)
-    val_ds   = TimeSeriesDataset(train_np[val_cut:], window_size, step=1)
+    val_arr  = train_np[val_cut:]
+    # 若验证段过短（< window_size + 1），退化为不切验证集，用完整训练集
+    if len(val_arr) <= window_size:
+        print("[WARN] 训练集太短，无法切出验证集，退化为使用全量训练集做早停")
+        train_ds = TimeSeriesDataset(train_np, window_size, train_step)
+        val_arr  = train_np
+    val_ds = TimeSeriesDataset(val_arr, window_size, step=1)
 
     train_loader = DataLoader(
         train_ds, batch_size=cfg["train"]["batch_size"],
@@ -309,7 +315,7 @@ def train(cfg: dict):
         if len(global_label) < test_len:
             test_len    = len(global_label)
             test_errors = test_errors[:test_len]
-            train_errors = train_errors   # 训练集不受影响
+            # train_errors 不受影响，无需截断
 
         # GDN 风格 IQR 归一化（Deng & Hooi, AAAI 2021）
         tr_median = np.median(train_errors, axis=0, keepdims=True)

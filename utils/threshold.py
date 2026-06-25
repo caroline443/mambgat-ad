@@ -255,8 +255,8 @@ class ValSetThreshold:
 
     def __repr__(self):
         mode = getattr(self, "_fit_mode", "未拟合")
-        return (f"ValSetThreshold(thr={self.threshold_:.6f}, "
-                f"mode={mode})")
+        thr  = f"{self.threshold_:.6f}" if self.threshold_ is not None else "None"
+        return f"ValSetThreshold(thr={thr}, mode={mode})"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

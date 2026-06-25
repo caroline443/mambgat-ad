@@ -21,7 +21,7 @@ import torch
 from data import build_loaders
 from models import MambGATAD
 from utils import evaluate_anomaly, print_metrics
-from utils.threshold import PerChannelThreshold, ValSetThreshold
+from utils.threshold import ValSetThreshold
 
 
 def topk_mean_agg(z: np.ndarray, k: int = 3) -> np.ndarray:
