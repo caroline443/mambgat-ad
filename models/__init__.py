@@ -1,11 +1,14 @@
-from .mambgat import MambGATAD, PredictionLoss
-from .st_block import STMambaGATEncoder, STMambaGATBlock
-from .ssm_layer import MambaBlock
-from .gat_layer import DynamicGATLayer, GraphModule
+"""
+MambGAT-AD 模型包
 
-__all__ = [
-    "MambGATAD", "PredictionLoss",
-    "STMambaGATEncoder", "STMambaGATBlock",
-    "MambaBlock",
-    "DynamicGATLayer", "GraphModule",
-]
+版本历史（渐进式叠加，每版独立可验证）：
+  v0  LinearEmbed + Mamba Encoder + 预测头          ← 当前
+  v1  + 动态 GAT（空间建模）
+  v2  + 频域损失（L_freq + L_shape）
+  v3  + 多尺度 Patch 嵌入
+  v4  + 图对比正则化（DGCL）
+"""
+
+from .model_v0 import MambGATAD, AnomalyLoss
+
+__all__ = ["MambGATAD", "AnomalyLoss"]
