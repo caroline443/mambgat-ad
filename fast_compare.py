@@ -125,7 +125,7 @@ def run_experiment(
             alpha=0.5, beta=0.1,
             lambda1=0.1,
             lambda2=0.05,
-            lambda_c=-0.4,
+            lambda_c=0.0,   # 对比损失暂时关闭（符号逻辑有问题，单独隔离验证）
         )
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-5)
