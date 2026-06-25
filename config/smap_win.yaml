@@ -7,6 +7,7 @@ data:
   window_step: 5
   test_step: 1
   normalize: true
+
 model:
   d_model: 128
   d_state: 16
@@ -16,6 +17,11 @@ model:
   n_blocks: 3
   dropout: 0.1
   pred_len: 1
+  # 改进 1：多尺度 Patch 嵌入
+  patch_sizes: [4, 8, 16]
+  # 改进 3：图对比快照数
+  n_snapshots: 4
+
 train:
   epochs: 50
   batch_size: 64
@@ -26,6 +32,16 @@ train:
   seed: 42
   save_dir: ./checkpoints
   num_workers: 0
+  val_ratio: 0.2
+
+# 改进 2+3：损失权重
+loss:
+  alpha: 0.5
+  beta: 0.1
+  lambda1: 0.1
+  lambda2: 0.05
+  lambda_c: -0.4
+
 threshold:
   method: valset
   smooth_window: 10

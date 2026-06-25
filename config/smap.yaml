@@ -7,6 +7,7 @@ data:
   window_step: 1
   test_step: 1
   normalize: true
+
 model:
   d_model: 128
   d_state: 16
@@ -16,6 +17,11 @@ model:
   n_blocks: 3
   dropout: 0.1
   pred_len: 1
+  # 改进 1：多尺度 Patch 嵌入（patch 大小需 <= window_size）
+  patch_sizes: [4, 8, 16]
+  # 改进 3：图对比快照数（沿 T 轴均分）
+  n_snapshots: 4
+
 train:
   epochs: 50
   batch_size: 128
@@ -26,6 +32,16 @@ train:
   seed: 42
   save_dir: ./checkpoints
   num_workers: 4
+  val_ratio: 0.2
+
+# 改进 2+3：损失权重
+loss:
+  alpha: 0.5       # pred_loss 中 MAE 权重
+  beta: 0.1        # 重建损失权重
+  lambda1: 0.1     # 频域损失权重（L_freq）
+  lambda2: 0.05    # 形状损失权重（L_shape）
+  lambda_c: -0.4   # 图对比正则化权重（负值=软正则化，参考 ContrastAD SMAP λ=-0.4）
+
 threshold:
   method: valset
   smooth_window: 10

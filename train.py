@@ -157,6 +157,8 @@ def train(cfg: dict):
         expand      = cfg["model"]["expand"],
         pred_len    = cfg["model"]["pred_len"],
         dropout     = cfg["model"]["dropout"],
+        patch_sizes = tuple(cfg["model"].get("patch_sizes", [4, 8, 16])),
+        n_snapshots = cfg["model"].get("n_snapshots", 4),
     ).to(device)
 
     print(f"[Model] MambGAT-AD | 参数量: {model.count_parameters():,}")
@@ -170,7 +172,14 @@ def train(cfg: dict):
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=cfg["train"]["epochs"], eta_min=1e-6
     )
-    criterion = PredictionLoss(alpha=0.5)
+    loss_cfg  = cfg.get("loss", {})
+    criterion = PredictionLoss(
+        alpha    = loss_cfg.get("alpha",    0.5),
+        beta     = loss_cfg.get("beta",     0.1),
+        lambda1  = loss_cfg.get("lambda1",  0.1),
+        lambda2  = loss_cfg.get("lambda2",  0.05),
+        lambda_c = loss_cfg.get("lambda_c", -0.4),
+    )
 
     # ── Checkpoint 目录 ───────────────────────────────────────────
     save_dir  = Path(cfg["train"]["save_dir"])
@@ -215,8 +224,9 @@ def train(cfg: dict):
             y_batch = y_batch.to(device, dtype=torch.float32)
 
             optimizer.zero_grad()
-            pred, recon, _ = model(x_batch)
-            loss = criterion(pred, y_batch, recon=recon, x=x_batch)
+            pred, recon, _, contrast_loss = model(x_batch)
+            loss = criterion(pred, y_batch, recon=recon, x=x_batch,
+                             contrast_loss=contrast_loss)
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
@@ -233,9 +243,10 @@ def train(cfg: dict):
             for x_v, y_v in val_loader:
                 x_v = x_v.to(device, dtype=torch.float32)
                 y_v = y_v.to(device, dtype=torch.float32)
-                pred_v, recon_v, _ = model(x_v)
+                pred_v, recon_v, _, contrast_v = model(x_v)
                 val_losses.append(
-                    criterion(pred_v, y_v, recon=recon_v, x=x_v).item()
+                    criterion(pred_v, y_v, recon=recon_v, x=x_v,
+                              contrast_loss=contrast_v).item()
                 )
         avg_val_loss = float(np.mean(val_losses))
 
@@ -392,7 +403,7 @@ def _collect_errors(
     with torch.no_grad():
         for x_batch, _ in tqdm(loader, desc=f"  [{desc}]", ncols=80, leave=False):
             x_batch = x_batch.to(device, dtype=torch.float32)
-            _, __, score = model(x_batch)    # (B, N)
+            _, __, score, ___ = model(x_batch)    # (B, N)
             all_scores.append(score.cpu().numpy())
     return np.concatenate(all_scores, axis=0)   # (T, N)
 
