@@ -1,14 +1,32 @@
 """
 评估指标
 
-标准评估协议（类 Telemanom）：
-  - 逐通道独立评估，报告宏平均（macro average）
-  - 同时报告 F1(raw)、F1(PA)、VUS-ROC
-  - 不用 OR 合并后的全局标签（会虚高异常率）
+── 工作区论文指标调研结论 ──────────────────────────────────────────
+  【标准 AUC-ROC，无 PA】
+    CATCH (ICLR 2025, 2410.12261)  : 标准 AUROC + Affiliated-F1
+    MTGFlow (2312.11549)           : 仅标准 AUROC
+    CST-GL  (2307.08390)           : 标准 AUROC + PRC-AUC
+    MemStream (2106.03837)         : 标准 AUROC
+
+  【PA-based F1，anomaly-ratio 阈值】
+    ContrastAD (2605.23744)        : F1-PA (best threshold on PA-adjusted scores)
+    MSHTrans (KDD 2025)            : F1 w/o PA + F1 with PA（均报）
+    GDN (2106.06947)               : F1-PA (val-set max threshold)
+
+  【不应报告：PA-adjusted 连续 AUROC】
+    ContrastAD 代码用 deepod.point_adjustment（传播段内最高连续分）再算 AUROC。
+    在 SMAP（67 段，段均长 816）上随机模型 PA-AUROC = 0.9988，指标失效。
+
+── 推荐报告组合 ────────────────────────────────────────────────────
+  论文中报告三项：
+    1. 标准 AUC-ROC          ← 与 CATCH / MTGFlow 可比
+    2. F1 w/o PA (AR阈值)    ← 与 MSHTrans "w/o PA" 可比
+    3. F1 with PA (AR阈值)   ← 与 ContrastAD / MSHTrans "with PA" 可比
 
 参考：
-  Hundman et al., KDD 2018 (Telemanom)
-  Kim et al., AAAI 2022 (批评 PA 虚高)
+  Hundman et al., KDD 2018 (Telemanom / point-adjust 来源)
+  Kim et al., AAAI 2022    (批评 PA 虚高)
+  Huet et al., KDD 2022    (Affiliated-F1)
   Paparrizos et al., VLDB 2022 (VUS)
 """
 
@@ -88,7 +106,8 @@ def vus_pr(y_true: np.ndarray, y_score: np.ndarray,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 异常率阈值（Anomaly Transformer / ContrastAD 协议，可与论文直接比 F1）
+# 异常率阈值（Anomaly Transformer / ContrastAD / MSHTrans 通用协议）
+# 用于产生二值预测，配合 point_adjust 得到 F1-PA(AR)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # 各数据集的标注异常率（来自 AT 格式数据集统计，ContrastAD Table 1）
@@ -286,17 +305,19 @@ def print_metrics(metrics: Dict[str, float], prefix: str = "") -> None:
     print(f"  {'指标':<22} {'值':>10}")
     print(f"{'─'*60}")
     order = [
-        ("auc_roc",    "AUC-ROC ★ 与ContrastAD直接比"),
-        ("vus_roc",    "VUS-ROC ★ 与Multi-View直接比"),
-        ("f1_pa_ar",   "F1-PA (anomaly-ratio) ★直接比"),
-        ("prec_pa_ar", "Precision (anomaly-ratio)"),
-        ("rec_pa_ar",  "Recall    (anomaly-ratio)"),
+        ("auc_roc",    "AUC-ROC (标准,无PA) ← CATCH/MTGFlow"),
+        ("f1_raw",     "F1  w/o PA (AR阈值) ← MSHTrans-wPA"),
+        ("prec_raw",   "Prec w/o PA"),
+        ("rec_raw",    "Rec  w/o PA"),
+        ("f1_pa_ar",   "F1  with PA (AR阈值) ← ContrastAD/MSHTrans"),
+        ("prec_pa_ar", "Prec with PA"),
+        ("rec_pa_ar",  "Rec  with PA"),
+        ("vus_roc",    "VUS-ROC"),
         ("vus_pr",     "VUS-PR"),
-        ("f1_pa_best", "F1-PA (best-F1, 参考)"),
-        ("f1_pa",      "F1-PA (train-pct, 部署)"),
-        ("prec_pa",    "Precision (PA)"),
-        ("rec_pa",     "Recall    (PA)"),
-        ("f1_raw",     "F1  (Raw)"),
+        ("f1_pa_best", "F1-PA (best-threshold, 参考上界)"),
+        ("f1_pa",      "F1-PA (train-pct阈值)"),
+        ("prec_pa",    "Precision (PA, train-pct)"),
+        ("rec_pa",     "Recall    (PA, train-pct)"),
         ("auc_pr",     "AUC-PR"),
     ]
     for key, label in order:

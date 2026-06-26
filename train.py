@@ -63,7 +63,11 @@ def collect_scores(model: MambGATAD, loader: DataLoader, device: torch.device) -
     """
     对 loader 中所有窗口推理，返回 (T, N) 异常分数矩阵。
 
-    score[i, n] = |pred[i,n] - y[i,n]| + mean_t|recon[i,:,n] - x[i,:,n]|
+    score[i, n] = |pred[i,n] - y[i,n]| + |recon[i,-1,n] - x[i,-1,n]|
+
+    注：recon 只取最后一步（ContrastAD 代码 test() 函数同协议）：
+        point_loss = criterion(input_seq[:, -1, :], recons[:, -1, :])
+        使用全窗口均值会稀释信号。
     """
     model.eval()
     all_scores = []
@@ -73,9 +77,9 @@ def collect_scores(model: MambGATAD, loader: DataLoader, device: torch.device) -
 
         pred, recon, _, _ = model(x_batch)
 
-        pred_err  = (pred.squeeze(-1) - y_batch).abs()      # (B, N)
-        recon_err = (recon - x_batch).abs().mean(dim=1)     # (B, N)
-        score = pred_err + recon_err                         # (B, N)
+        pred_err  = (pred.squeeze(-1) - y_batch).abs()              # (B, N)
+        recon_err = (recon[:, -1, :] - x_batch[:, -1, :]).abs()     # (B, N) 最后一步
+        score = pred_err + recon_err                                  # (B, N)
 
         all_scores.append(score.cpu().numpy())
 
@@ -96,11 +100,35 @@ def evaluate(
     device: torch.device,
 ) -> dict:
     """
-    标准评估流程：
-      1. 收集训练集分数（用于 IQR 归一化）
-      2. 收集测试集分数
-      3. IQR 归一化 → top-3 均值聚合 → 全局分数
-      4. 计算 AUC-ROC、F1-PA（anomaly-ratio 阈值）
+    标准评估流程（基于对工作区所有论文指标的综合分析）：
+
+    ── 分数计算 ──────────────────────────────────────────────────
+    score = |pred_err| + |recon_last_err|    (逐通道，见 collect_scores)
+
+    ── 归一化（单向 z-score）──────────────────────────────────────
+    用训练集均值/标准差归一化，clip(0) 保留"高于训练均值"的部分。
+    IQR+abs 方案会在异常分数低于训练中位数时反转方向，导致 AUROC<0.5。
+
+    ── 聚合 ───────────────────────────────────────────────────────
+    所有通道取均值（全局异常分）。
+
+    ── 指标（依据工作区论文调研）─────────────────────────────────
+    1. 标准 AUC-ROC（无 PA，无分数调整）
+       - 与 CATCH(ICLR2025)、MTGFlow、CST-GL、MemStream 直接可比
+       - 阈值无关，最诚实的评估指标
+
+    2. F1 w/o PA（anomaly-ratio 阈值，无 point adjustment）
+       - 与 MSHTrans(KDD2025) Table 1 "w/o PA" 列直接可比
+
+    3. F1 with PA（anomaly-ratio 阈值 + point adjustment）
+       - 与 ContrastAD、MSHTrans(KDD2025) "with PA" 列直接可比
+       - GDN 也使用 PA，但阈值用验证集最大值而非 anomaly-ratio
+
+    ── 不报告的指标（及原因）────────────────────────────────────
+    PA-adjusted 连续 AUROC（即 ContrastAD 代码中的 ts_metrics 实现）：
+      point_adjustment 把每段异常内最大分数传播给段内所有点，
+      再算 AUROC。在 SMAP（67 段，平均段长 816）上，
+      随机模型也能达到 AUROC=0.9988，该指标已完全失去区分力。
     """
     print("\n  [评估] 收集训练集分数...")
     train_scores = collect_scores(model, train_loader, device)   # (T_tr, N)
@@ -108,48 +136,69 @@ def evaluate(
     print("  [评估] 收集测试集分数...")
     test_scores  = collect_scores(model, test_loader,  device)   # (T_te, N)
 
-    # ── IQR 归一化（GDN 协议）────────────────────────────────────
-    tr_med = np.median(train_scores, axis=0, keepdims=True)
-    tr_iqr = (np.percentile(train_scores, 75, axis=0, keepdims=True)
-              - np.percentile(train_scores, 25, axis=0, keepdims=True) + 1e-4)
-    z_test = (test_scores - tr_med) / tr_iqr                    # (T_te, N)  注：不用 abs，异常=误差高于训练中位数
+    # ── 单向 z-score 归一化 ───────────────────────────────────────
+    # 只保留"高于训练均值"的部分；负值（误差低于训练中位数）clip 到 0
+    tr_mean = train_scores.mean(axis=0, keepdims=True)
+    tr_std  = train_scores.std(axis=0,  keepdims=True) + 1e-4
+    z_test  = np.clip((test_scores - tr_mean) / tr_std, 0, None)  # (T_te, N)
 
-    # ── top-3 均值聚合 → 全局分数 ────────────────────────────────
-    k = min(3, z_test.shape[1])
-    global_score = np.partition(z_test, -k, axis=1)[:, -k:].mean(axis=1)  # (T_te,)
+    # ── 全通道均值聚合 ────────────────────────────────────────────
+    global_score = z_test.mean(axis=1)                             # (T_te,)
 
-    # ── 标签对齐（窗口末尾对应 label[i + W - 1]）─────────────────
+    # ── 标签对齐 ──────────────────────────────────────────────────
     T_score = len(global_score)
     offset  = window_size - 1
     label   = test_labels[offset: offset + T_score].astype(int)
     if len(label) < T_score:
         global_score = global_score[:len(label)]
-        T_score = len(label)
+        T_score      = len(label)
 
-    # ── 计算指标 ─────────────────────────────────────────────────
-    from sklearn.metrics import roc_auc_score as _auc
-    auc = float(_auc(label, global_score)) if label.sum() > 0 else 0.0
+    from sklearn.metrics import (roc_auc_score as _auc,
+                                  f1_score, precision_score, recall_score)
 
-    # F1-PA（anomaly-ratio 阈值，与 ContrastAD Table 2 直接可比）
-    y_pred_ar    = anomaly_ratio_threshold(label, global_score, dataset=dataset_name)
+    # ── 1. 标准 AUC-ROC（无 PA，阈值无关）───────────────────────
+    std_auc = float(_auc(label, global_score)) if label.sum() > 0 else 0.0
+
+    # ── 2 & 3. anomaly-ratio 阈值 ─────────────────────────────────
+    y_pred_ar = anomaly_ratio_threshold(label, global_score, dataset=dataset_name)
+
+    # 2. F1 w/o PA（MSHTrans Table 1 "w/o PA" 列）
+    f1_raw  = float(f1_score(label, y_pred_ar,    zero_division=0))
+    prec_raw = float(precision_score(label, y_pred_ar, zero_division=0))
+    rec_raw  = float(recall_score(label, y_pred_ar,  zero_division=0))
+
+    # 3. F1 with PA（ContrastAD / MSHTrans "with PA"）
     y_pred_ar_pa = point_adjust(label, y_pred_ar)
-    from sklearn.metrics import f1_score, precision_score, recall_score
-    f1_pa  = float(f1_score(label, y_pred_ar_pa, zero_division=0))
-    prec   = float(precision_score(label, y_pred_ar_pa, zero_division=0))
-    rec    = float(recall_score(label, y_pred_ar_pa, zero_division=0))
+    f1_pa   = float(f1_score(label, y_pred_ar_pa,    zero_division=0))
+    prec_pa = float(precision_score(label, y_pred_ar_pa, zero_division=0))
+    rec_pa  = float(recall_score(label, y_pred_ar_pa,  zero_division=0))
 
     metrics = {
-        "auc_roc":    auc,
-        "f1_pa_ar":   f1_pa,
-        "prec_pa_ar": prec,
-        "rec_pa_ar":  rec,
+        # ① 与 CATCH / MTGFlow / CST-GL 直接可比
+        "auc_roc":      std_auc,
+        # ② 与 MSHTrans w/o PA 直接可比
+        "f1_raw":       f1_raw,
+        "prec_raw":     prec_raw,
+        "rec_raw":      rec_raw,
+        # ③ 与 ContrastAD / MSHTrans with PA 直接可比
+        "f1_pa_ar":     f1_pa,
+        "prec_pa_ar":   prec_pa,
+        "rec_pa_ar":    rec_pa,
     }
 
-    print(f"\n{'─'*50}")
+    W = 58
+    print(f"\n{'─'*W}")
     print(f"  数据集: {dataset_name.upper()}")
-    print(f"  AUC-ROC  : {auc:.4f}   ← 与 ContrastAD 直接比")
-    print(f"  F1-PA(AR): {f1_pa:.4f}  Prec={prec:.4f}  Rec={rec:.4f}")
-    print(f"{'─'*50}")
+    print(f"{'─'*W}")
+    print(f"  标准 AUC-ROC (无PA，阈值无关)  : {std_auc:.4f}"
+          f"  ← 与 CATCH / MTGFlow 直接可比")
+    print(f"  F1  w/o PA (anomaly-ratio阈值) : {f1_raw:.4f}"
+          f"  P={prec_raw:.4f}  R={rec_raw:.4f}"
+          f"  ← 与 MSHTrans(KDD25) w/o PA 直接可比")
+    print(f"  F1  with PA (anomaly-ratio阈值): {f1_pa:.4f}"
+          f"  P={prec_pa:.4f}  R={rec_pa:.4f}"
+          f"  ← 与 ContrastAD / MSHTrans with PA 直接可比")
+    print(f"{'─'*W}")
 
     return metrics
 
